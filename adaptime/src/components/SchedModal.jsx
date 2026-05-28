@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { DAYS } from '../data/seed';
+import { DAYS } from '../utils/scheduler';
+import { diffColor, diffLabel } from '../utils/helpers';
 
 export default function SchedModal({ schedule, onSave, onClose }) {
   const [f, setF] = useState(schedule || {
-    day: 'Senin', startTime: '08:00', endTime: '10:00', type: 'kelas', name: '',
+    day: 'Senin', startTime: '08:00', endTime: '10:00',
+    type: 'kelas', name: '', difficulty: 3,
   });
 
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
 
   const save = () => {
-    if (!f.name) { alert('Nama kegiatan wajib diisi!'); return; }
+    if (!f.name.trim()) { alert('Nama kegiatan wajib diisi!'); return; }
     if (f.startTime >= f.endTime) { alert('Jam selesai harus lebih dari jam mulai!'); return; }
     onSave(f);
   };
@@ -54,6 +56,28 @@ export default function SchedModal({ schedule, onSave, onClose }) {
             <option value="kerja">💼 Kerja</option>
             <option value="pribadi">🏃 Pribadi</option>
           </select>
+        </div>
+
+        {/* Energy drain rating — same 1–5 scale as tasks */}
+        <div className="form-group">
+          <label>
+            Tingkat Kuras Energi:{' '}
+            <span style={{ color: diffColor(f.difficulty) }}>
+              {diffLabel(f.difficulty)} ({f.difficulty}/5)
+            </span>
+          </label>
+          <input
+            type="range" min="1" max="5"
+            value={f.difficulty}
+            onChange={e => set('difficulty', parseInt(e.target.value))}
+            style={{ marginTop: 7, width: '100%' }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#3D5A7A', marginTop: 2 }}>
+            <span>1 – Ringan</span><span>3 – Sedang</span><span>5 – Berat</span>
+          </div>
+          <div style={{ fontSize: 11, color: '#3D5A7A', marginTop: 4 }}>
+            Seberapa banyak kegiatan ini menguras energimu? Mempengaruhi slot setelahnya.
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>

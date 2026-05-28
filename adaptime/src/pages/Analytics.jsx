@@ -1,9 +1,8 @@
-import { useMemo } from 'react';
-import { diffColor, diffLabel } from '../utils/helpers';
-import { runScheduler } from '../utils/scheduler';
 
-export default function Analytics({ tasks, schedules, energySettings }) {
-  const todayISO = new Date().toISOString().split('T')[0];
+import { diffColor, diffLabel } from '../utils/helpers';
+
+
+export default function Analytics({ tasks = [], schedules = [], energySettings = {}, sessions = [] }) {
   const total   = tasks.length;
   const done    = tasks.filter(t => t.status === 'done').length;
   const rate    = total > 0 ? Math.round(done / total * 100) : 0;
@@ -23,10 +22,7 @@ export default function Analytics({ tasks, schedules, energySettings }) {
     color: diffColor(d),
   }));
 
-  const scheduled = useMemo(() =>
-    runScheduler(tasks, schedules, energySettings, todayISO),
-    [tasks, schedules, energySettings, todayISO]
-  );
+  const scheduled = sessions || [];
 
   const maxBar = Math.max(...timeProd.map(t => t.total), 1);
   const mostProductiveTime = [...timeProd].sort((a, b) => b.done - a.done)[0];
