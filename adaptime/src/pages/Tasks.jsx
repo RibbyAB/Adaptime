@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import TaskModal from '../components/TaskModal';
 import { StatusBadge } from '../components/Badge';
 import { diffColor, diffLabel, daysLeft } from '../utils/helpers';
+import { runScheduler, formatHour } from '../utils/scheduler';
 
 const FILTERS = [
   ['all', 'Semua'],
@@ -11,10 +12,12 @@ const FILTERS = [
   ['overdue', 'Overdue'],
 ];
 
-export default function Tasks({ tasks, setTasks }) {
+export default function Tasks({ tasks, addTask, updateTask, deleteTask }) {
   const [filter, setFilter] = useState('all');
   const [modal, setModal] = useState(null);
-  const [nid, setNid] = useState(100);
+  const [deleting, setDeleting] = useState(null);
+
+  const today = new Date().toISOString().split('T')[0];
 
   const counts = {
     all: tasks.length,
@@ -31,17 +34,24 @@ export default function Tasks({ tasks, setTasks }) {
     [tasks, filter]
   );
 
-  const saveTask = form => {
+  const saveTask = async (form) => {
     if (modal === 'add') {
-      setTasks(p => [...p, { ...form, id: nid }]);
-      setNid(n => n + 1);
+      await addTask(form);
     } else {
-      setTasks(p => p.map(t => t.id === modal.id ? { ...t, ...form } : t));
+      await updateTask(modal.id, form);
     }
     setModal(null);
   };
 
-  const del = id => setTasks(p => p.filter(t => t.id !== id));
+  const handleDelete = async (id) => {
+    setDeleting(id);
+    await deleteTask(id);
+    setDeleting(null);
+  };
+
+  const handleStatusChange = async (task, newStatus) => {
+    await updateTask(task.id, { status: newStatus });
+  };
 
   return (
     <div className="fade-in">
@@ -52,11 +62,7 @@ export default function Tasks({ tasks, setTasks }) {
 
       <div className="pill-tabs">
         {FILTERS.map(([k, lbl]) => (
-          <div
-            key={k}
-            className={`pill-tab ${filter === k ? 'active' : ''}`}
-            onClick={() => setFilter(k)}
-          >
+          <div key={k} className={`pill-tab ${filter === k ? 'active' : ''}`} onClick={() => setFilter(k)}>
             {lbl} ({counts[k]})
           </div>
         ))}
@@ -71,10 +77,7 @@ export default function Tasks({ tasks, setTasks }) {
         const dl = daysLeft(t.deadline);
         return (
           <div key={t.id} className="task-card" onClick={() => setModal(t)}>
-            <div style={{
-              width: 3, borderRadius: 2, background: diffColor(t.difficulty),
-              alignSelf: 'stretch', minHeight: 36, flexShrink: 0,
-            }} />
+            <div style={{ width: 3, borderRadius: 2, background: diffColor(t.difficulty), alignSelf: 'stretch', minHeight: 36, flexShrink: 0 }} />
             <div style={{ flex: 1 }}>
               <div className="task-name">{t.name}</div>
               <div className="task-meta">
@@ -86,12 +89,26 @@ export default function Tasks({ tasks, setTasks }) {
                 <span>⏱ {t.hours}j</span>
               </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
               <StatusBadge status={t.status} />
-              <button
-                className="btn btn-danger"
-                onClick={e => { e.stopPropagation(); del(t.id); }}
-              >Hapus</button>
+              <div style={{ display: 'flex', gap: 5 }}>
+                {t.status !== 'done' && (
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '4px 9px', fontSize: 11 }}
+                    onClick={e => { e.stopPropagation(); handleStatusChange(t, t.status === 'in-progress' ? 'done' : 'in-progress'); }}
+                  >
+                    {t.status === 'in-progress' ? '✓ Selesai' : '▶ Mulai'}
+                  </button>
+                )}
+                <button
+                  className="btn btn-danger"
+                  onClick={e => { e.stopPropagation(); handleDelete(t.id); }}
+                  disabled={deleting === t.id}
+                >
+                  {deleting === t.id ? '...' : 'Hapus'}
+                </button>
+              </div>
             </div>
           </div>
         );

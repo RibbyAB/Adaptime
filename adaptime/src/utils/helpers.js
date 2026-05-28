@@ -1,5 +1,3 @@
-import { TODAY } from '../data/seed';
-
 export const diffColor = (d) =>
   ['', '#10B981', '#34D399', '#F59E0B', '#F97316', '#EF4444'][d] ?? '#4B6A8A';
 
@@ -9,15 +7,18 @@ export const diffLabel = (d) =>
 export const energyColor = (lv) =>
   lv >= 4 ? '#10B981' : lv >= 3 ? '#F59E0B' : '#EF4444';
 
-export const daysLeft = (deadline) =>
-  Math.ceil((new Date(deadline) - new Date(TODAY)) / 86400000);
+export const daysLeft = (deadline) => {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  return Math.ceil((new Date(deadline) - today) / 86400000);
+};
 
 export const statusBadge = (status) => {
   const map = {
-    pending:      { cls: 'badge-pending',  label: 'Pending' },
-    'in-progress':{ cls: 'badge-progress', label: 'Dikerjakan' },
-    done:         { cls: 'badge-done',     label: 'Selesai' },
-    overdue:      { cls: 'badge-overdue',  label: 'Overdue' },
+    pending:       { cls: 'badge-pending',  label: 'Pending' },
+    'in-progress': { cls: 'badge-progress', label: 'Dikerjakan' },
+    done:          { cls: 'badge-done',     label: 'Selesai' },
+    overdue:       { cls: 'badge-overdue',  label: 'Overdue' },
   };
   return map[status] ?? { cls: 'badge-pending', label: '?' };
 };
