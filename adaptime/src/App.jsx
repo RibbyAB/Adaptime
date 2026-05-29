@@ -99,6 +99,8 @@ export default function App() {
             setView={setView}
             defaultCap={defaultCap}
             workCap={workCap}
+            updateTask={updateTask}
+            updateSession={updateSession}
           />
         )}
         
@@ -130,7 +132,7 @@ export default function App() {
             onReschedule={doReschedule}
           />
         )}
-        {view === 'calendar' && energy && (
+        {view === 'calendar' && (
           <CalendarView
             {...sharedProps}
             updateSession={updateSession}

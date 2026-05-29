@@ -1,5 +1,7 @@
 import { diffColor, energyColor, daysLeft } from '../utils/helpers';
-import { StatusBadge, TypeBadge } from '../components/Badge';
+import { TypeBadge } from '../components/Badge';
+import SessionCard from '../components/SessionCard';
+import TaskCard from '../components/TaskCard';
 import { formatHour, SLOT_DEFINITIONS } from '../utils/scheduler';
 
 const DAYS = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
@@ -16,7 +18,7 @@ function isoDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-export default function Dashboard({ tasks = [], schedules = [], energySettings = {}, sessions = [], user, setView, onReschedule, rescheduling, defaultCap }) {
+export default function Dashboard({ tasks = [], schedules = [], energySettings = {}, sessions = [], user, setView, onReschedule, rescheduling, defaultCap, updateTask, updateSession }) {
   const todayName = getTodayName();
   const todayISO  = isoDate(new Date());
 
@@ -139,21 +141,9 @@ export default function Dashboard({ tasks = [], schedules = [], energySettings =
           </div>
           {urgent.length === 0 ? (
             <p style={{ color: '#3D5A7A', fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Semua task sudah selesai! 🎉</p>
-          ) : urgent.map(t => {
-            const dl = daysLeft(t.deadline);
-            return (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 0', borderBottom: '1px solid rgba(59,130,246,0.05)' }}>
-                <div style={{ width: 3, height: 34, borderRadius: 2, background: diffColor(t.difficulty), flexShrink: 0 }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#C8DCFF', marginBottom: 2 }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: dl <= 0 ? '#EF4444' : dl <= 2 ? '#F59E0B' : '#4B6A8A' }}>
-                    {dl < 0 ? `⚠️ ${-dl}h terlambat` : dl === 0 ? '🔥 Deadline hari ini!' : dl === 1 ? '⏰ Besok deadline' : `📅 ${dl} hari lagi`}
-                  </div>
-                </div>
-                <StatusBadge status={t.status} />
-              </div>
-            );
-          })}
+          ) : urgent.map(t => (
+            <TaskCard key={t.id} task={t} onUpdate={updateTask} />
+          ))}
         </div>
       </div>
 
@@ -179,23 +169,8 @@ export default function Dashboard({ tasks = [], schedules = [], energySettings =
           <p style={{ color: '#3D5A7A', fontSize: 12, textAlign: 'center', padding: '20px 0' }}>
             {rescheduling ? '⏳ Menjadwalkan...' : 'Tidak ada sesi hari ini. Tambah task untuk memulai!'}
           </p>
-        ) : todayScheduled.map((s, i) => (
-          <div key={s.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(59,130,246,0.05)', opacity: s.isDone ? 0.5 : 1 }}>
-            <div style={{ fontSize: 18 }}>{s.slotIcon}</div>
-            <div style={{ minWidth: 80 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: s.isDone ? '#3D5A7A' : '#60A5FA', textDecoration: s.isDone ? 'line-through' : 'none' }}>
-                {formatHour(s.startH)} – {formatHour(s.endH)}
-              </div>
-              <div style={{ fontSize: 10, color: '#3D5A7A' }}>{s.slotLabel}</div>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#C8DCFF', textDecoration: s.isDone ? 'line-through' : 'none' }}>
-                {s.taskName}
-                {s.totalSessions > 1 && <span style={{ fontSize: 10, color: '#4B6A8A', marginLeft: 6 }}>Sesi {s.sessionNum}/{s.totalSessions}</span>}
-              </div>
-            </div>
-            <div style={{ fontSize: 10, color: '#4B6A8A' }}>⚡{s.energyLevel}/5</div>
-          </div>
+        ) : todayScheduled.map(s => (
+          <SessionCard key={s.id} session={s} onUpdate={updateSession} isPast={false} />
         ))}
       </div>
 

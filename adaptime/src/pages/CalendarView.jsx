@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { formatHour, SLOT_DEFINITIONS, DAYS } from '../utils/scheduler';
 import { diffColor } from '../utils/helpers';
+import SessionCard from '../components/SessionCard';
 
 const MONTHS_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 
@@ -20,7 +21,7 @@ function isoDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-export default function CalendarView({ tasks = [], schedules = [], sessions = [], onReschedule, rescheduling }) {
+export default function CalendarView({ tasks = [], schedules = [], sessions = [], onReschedule, rescheduling, updateSession }) {
   const todayISO = isoDate(new Date());
   const [weekStart, setWeekStart]     = useState(() => getMonday(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayISO);
@@ -138,27 +139,8 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
                   {slot.icon} {slot.label}
                   <span style={{ fontSize: 10, color: '#3D5A7A', marginLeft: 4 }}>({formatHour(slot.startH)}–{formatHour(slot.endH)})</span>
                 </div>
-                {slotSessions.map((s, i) => (
-                  <div key={s.id || i} style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '8px 10px', borderRadius: 8, marginBottom: 6,
-                    background: s.isDone ? 'rgba(16,185,129,0.04)' : isPast(selectedDate) ? 'rgba(11,22,45,0.3)' : 'rgba(59,130,246,0.05)',
-                    border: `1px solid ${s.isDone ? 'rgba(16,185,129,0.15)' : isPast(selectedDate) ? 'rgba(59,130,246,0.05)' : 'rgba(59,130,246,0.1)'}`,
-                    opacity: isPast(selectedDate) && !s.isDone ? 0.65 : 1,
-                  }}>
-                    <div style={{ width: 3, height: 34, borderRadius: 2, background: diffColor(s.difficulty), flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: s.isDone ? '#34D399' : '#C8DCFF', textDecoration: s.isDone ? 'line-through' : 'none' }}>
-                        {s.taskName}
-                        {s.totalSessions > 1 && <span style={{ fontSize: 10, color: '#4B6A8A', marginLeft: 5 }}>Sesi {s.sessionNum}/{s.totalSessions}</span>}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#60A5FA', marginTop: 1 }}>
-                        {formatHour(s.startH)} – {formatHour(s.endH)}
-                        <span style={{ color: '#3D5A7A', marginLeft: 6 }}>({Math.round((s.endH - s.startH) * 60)}m)</span>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 10, color: '#3D5A7A' }}>⚡{s.energyLevel}/5</div>
-                  </div>
+                {slotSessions.map(s => (
+                  <SessionCard key={s.id} session={s} onUpdate={updateSession} isPast={isPast(selectedDate)} />
                 ))}
               </div>
             );
