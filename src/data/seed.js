@@ -18,6 +18,35 @@ export function getDemoTasks(uid) {
   return [
     {
       uid,
+      name: 'Tugas Mandiri — Review Jurnal Internasional',
+      deadline: todayMinus(2), // Deadline 2 hari yang lalu
+      difficulty: 3,
+      status: 'pending',
+      timePref: 'morning',
+      hours: 4,
+      description: 'Review paper tentang cloud computing dan serverless architecture.',
+      checklist: [
+        { id: 1, text: 'Baca paper', done: true },
+        { id: 2, text: 'Tulis ringkasan', done: false },
+      ],
+      prefSessionHours: 2,
+      createdAt: Date.now() - 86400000 * 5,
+    },
+    {
+      uid,
+      name: 'Latihan Soal Ujian — Pemrograman Lanjut',
+      deadline: todayMinus(5), // Deadline 5 hari yang lalu
+      difficulty: 5,
+      status: 'in-progress',
+      timePref: 'evening',
+      hours: 6,
+      description: 'Latihan soal persiapan ujian akhir semester materi rekursi dan struktur data.',
+      checklist: [],
+      prefSessionHours: 2,
+      createdAt: Date.now() - 86400000 * 8,
+    },
+    {
+      uid,
       name: 'Kerjakan Tugas Basis Data — ERD & Normalisasi',
       deadline: todayPlus(2),
       difficulty: 4,
@@ -162,7 +191,6 @@ export function getDemoTasks(uid) {
       prefSessionHours: null,
       createdAt: Date.now(),
     },
-    // Completed tasks for analytics
     {
       uid,
       name: 'Tugas Algoritma — Sorting & Searching',
