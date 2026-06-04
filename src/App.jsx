@@ -23,7 +23,13 @@ function isoDate(d) {
 export default function App() {
   const [user, setUser]               = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [view, setView]               = useState('dashboard');
+  const [view, setView] = useState(() => {
+    return localStorage.getItem('lastView') || 'dashboard';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('lastView', view);
+  }, [view]);
   const [rescheduling, setRescheduling] = useState(false);
 
   useEffect(() => {
@@ -56,16 +62,26 @@ export default function App() {
 
   const doReschedule = useCallback(async () => {
     if (!user?.uid || tasks.length === 0) return;
+    
     setRescheduling(true);
+    const startTime = Date.now(); // Catat waktu mulai
+    
     try {
       const todayISO = isoDate(new Date());
-      const capMap   = (getCapMap ? getCapMap() : null) ?? {};
+      const capMap = (getCapMap ? getCapMap() : null) ?? {};
       const { scheduled } = runScheduler(tasks, schedules, energySettings, todayISO, 14, capMap);
       await replaceAllSessions(scheduled);
     } catch (err) {
       console.error('Reschedule failed:', err);
     } finally {
-      setRescheduling(false);
+      // Patokan: Hitung selisih waktu
+      const elapsed = Date.now() - startTime;
+      const minDuration = 1500; // Minimal 1.5 detik
+      const delay = Math.max(0, minDuration - elapsed);
+      
+      setTimeout(() => {
+        setRescheduling(false);
+      }, delay);
     }
   }, [user, tasks, schedules, energySettings, getCapMap, replaceAllSessions]);
 

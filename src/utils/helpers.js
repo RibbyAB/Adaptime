@@ -9,8 +9,15 @@ export const energyColor = (lv) =>
 
 export const daysLeft = (deadline) => {
   const today = new Date();
-  today.setHours(0,0,0,0);
-  return Math.ceil((new Date(deadline) - today) / 86400000);
+  today.setHours(0, 0, 0, 0);
+
+  const deadlineDate = new Date(deadline + 'T00:00:00');
+  deadlineDate.setHours(0, 0, 0, 0);
+
+  const diffTime = deadlineDate - today;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  return diffDays;
 };
 
 export const statusBadge = (status) => {

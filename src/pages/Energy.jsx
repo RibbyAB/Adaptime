@@ -75,7 +75,7 @@ export default function Energy({ energySettings = {}, setEnergySettings, workCap
       {/* Work hour cap */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: '#7BA5C8', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '.5px' }}>
-          ⏱️ Batas Jam Kerja per Hari
+          ⏱️ Batas Jam Kegiatan per Hari
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 8 }}>
           <div style={{ flex: 1 }}>

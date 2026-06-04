@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import TaskModal from '../components/TaskModal';
 import { StatusBadge } from '../components/Badge';
 import { diffColor, diffLabel, daysLeft } from '../utils/helpers';
-// BUG FIX: Removed unused imports 'runScheduler' and 'formatHour'
+import { auth } from '../firebase';
 
 const FILTERS = [
   ['all', 'Semua'],
@@ -43,12 +43,25 @@ export default function Tasks({ tasks, addTask, updateTask, deleteTask }) {
     setModal(null);
   };
 
-  const handleDelete = async (id) => {
-    setDeleting(id);
-    await deleteTask(id);
-    setDeleting(null);
-  };
+  const handleDelete = async (task) => {
+    console.log("Mencoba hapus ID:", task.id);
+    console.log("UID Dokumen:", task.uid);
+    console.log("UID User Login:", auth.currentUser?.uid);
 
+    if (task.uid !== auth.currentUser?.uid) {
+      alert("Error: UID tidak cocok! Anda tidak punya izin menghapus task milik orang lain.");
+      return;
+    }
+
+    setDeleting(task.id);
+    try {
+      await deleteTask(task.id);
+    } catch (err) {
+      console.error("Firebase Error:", err);
+    } finally {
+      setDeleting(null);
+    }
+  };
   const handleStatusChange = async (task, newStatus) => {
     await updateTask(task.id, { status: newStatus });
   };
@@ -82,9 +95,10 @@ export default function Tasks({ tasks, addTask, updateTask, deleteTask }) {
               <div className="task-name">{t.name}</div>
               <div className="task-meta">
                 <span>📅 {t.deadline}</span>
-                <span style={{ color: dl < 0 ? '#EF4444' : dl <= 1 ? '#F59E0B' : '#4B6A8A' }}>
-                  {dl < 0 ? `⚠️ ${-dl}h terlambat` : dl === 0 ? '🔥 Hari ini!' : dl === 1 ? '⏰ Besok' : `${dl}h lagi`}
-                </span>
+                  <span style={{ color: t.status === 'done' ? '#4B6A8A' : (dl < 0 ? '#EF4444' : dl <= 1 ? '#F59E0B' : '#4B6A8A') }}>
+                    {t.status === 'done' ? '✅ Selesai' 
+                      : (dl < 0 ? `⚠️ ${-dl}h terlambat` : dl === 0 ? '🔥 Hari ini!' : dl === 1 ? '⏰ Besok' : `${dl}h lagi`)}
+                  </span>
                 <span style={{ color: diffColor(t.difficulty) }}>◆ {diffLabel(t.difficulty)}</span>
                 <span>⏱ {t.hours}j</span>
               </div>
@@ -103,7 +117,7 @@ export default function Tasks({ tasks, addTask, updateTask, deleteTask }) {
                 )}
                 <button
                   className="btn btn-danger"
-                  onClick={e => { e.stopPropagation(); handleDelete(t.id); }}
+                  onClick={e => { e.stopPropagation(); handleDelete(t); }}
                   disabled={deleting === t.id}
                 >
                   {deleting === t.id ? '...' : 'Hapus'}
