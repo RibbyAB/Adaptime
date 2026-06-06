@@ -3,12 +3,12 @@ import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
+  apiKey: "AIzaSyAzdCIG87SnK8SbN2GoGAVsqZER_Eai0B0",
+  authDomain: "adaptime-df1f2.firebaseapp.com",
+  projectId: "adaptime-df1f2",
+  storageBucket: "adaptime-df1f2.firebasestorage.app",
+  messagingSenderId: "718151825943",
+  appId: "1:718151825943:web:0e326832843b71eac77a52"
 };
 
 const app = initializeApp(firebaseConfig);
