@@ -19,8 +19,7 @@ export default function SessionCard({ session, onUpdate, isPast }) {
 
   const toggleCheckItem = async (itemId) => {
     const updated = checklist.map(i => i.id === itemId ? { ...i, done: !i.done } : i);
-    const allDone = updated.length > 0 && updated.every(i => i.done);
-    await onUpdate(session.id, { checklist: updated, ...(allDone ? { isDone: true } : {}) });
+    await onUpdate(session.id, { checklist: updated });
   };
 
   const saveNote = async () => {

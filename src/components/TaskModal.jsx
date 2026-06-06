@@ -174,6 +174,7 @@ export default function TaskModal({ task, onSave, onClose }) {
           <div className="form-group">
             <label>Preferensi Waktu</label>
             <select className="inp" value={f.timePref} onChange={e => set('timePref', e.target.value)}>
+              <option value="anytime">🕐 Bebas (00–24)</option>
               <option value="morning">🌅 Pagi (06–12)</option>
               <option value="afternoon">☀️ Siang (12–17)</option>
               <option value="evening">🌆 Sore (17–20)</option>
@@ -223,7 +224,7 @@ export default function TaskModal({ task, onSave, onClose }) {
               />
               {(f.checklist || []).length > 0 && (
                 <div style={{ fontSize: 11, color: '#3D5A7A', marginTop: 6 }}>
-                  Task otomatis selesai jika semua item diceklis.
+                  Centang item saat kamu selesai mengerjakannya.
                 </div>
               )}
             </div>

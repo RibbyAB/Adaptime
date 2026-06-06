@@ -21,8 +21,42 @@ function isoDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-export default function CalendarView({ tasks = [], schedules = [], sessions = [], onReschedule, rescheduling, updateSession }) {
+export default function CalendarView({ tasks = [], schedules = [], sessions = [], sessionsLoading = false, onReschedule, rescheduling, updateSession, updateTask }) {
   const todayISO = isoDate(new Date());
+
+  // Smart session update: when all sessions of a task are done -> mark task done
+  // When a session is un-done -> revert task to in-progress
+  const handleSessionUpdate = async (sessionId, updates) => {
+    await updateSession(sessionId, updates);
+
+    // Only re-evaluate task status when isDone is being toggled
+    if (!('isDone' in updates)) return;
+
+    // Find the session being updated
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    // Get all sessions for this task (with the update applied)
+    const taskSessions = sessions.map(s =>
+      s.id === sessionId ? { ...s, ...updates } : s
+    ).filter(s => s.taskId === session.taskId);
+
+    if (taskSessions.length === 0) return;
+
+    const allDone = taskSessions.every(s => s.isDone);
+    const anyDone = taskSessions.some(s => s.isDone);
+
+    const task = tasks.find(t => t.id === session.taskId);
+    if (!task || task.status === 'overdue') return;
+
+    if (allDone && task.status !== 'done') {
+      await updateTask(task.id, { status: 'done' });
+    } else if (!allDone && task.status === 'done') {
+      await updateTask(task.id, { status: 'in-progress' });
+    } else if (anyDone && task.status === 'pending') {
+      await updateTask(task.id, { status: 'in-progress' });
+    }
+  };
   const [weekStart, setWeekStart]     = useState(() => getMonday(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayISO);
 
@@ -65,6 +99,7 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
 
   return (
     <div className="fade-in">
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <h2 style={{ fontSize: 21, fontWeight: 800, color: '#E2ECFF' }}>📆 Kalender Jadwal</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -127,7 +162,12 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
           </div>
           {dayScheduled.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '30px 0', color: '#3D5A7A', fontSize: 12 }}>
-              {rescheduling ? '⏳ Menjadwalkan...' : isPast(selectedDate) ? '📭 Tidak ada sesi' : '🎉 Tidak ada task untuk hari ini'}
+              {(rescheduling || sessionsLoading) ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 24, height: 24, border: '2px solid rgba(59,130,246,0.3)', borderTop: '2px solid #3B82F6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  <span>{rescheduling ? 'Menjadwalkan ulang...' : 'Memuat sesi...'}</span>
+                </div>
+              ) : isPast(selectedDate) ? '📭 Tidak ada sesi' : '🎉 Tidak ada task untuk hari ini'}
             </div>
           ) : SLOT_DEFINITIONS.map(slot => {
             const slotSessions = dayScheduled.filter(s => s.slotKey === slot.key);
@@ -139,7 +179,7 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
                   <span style={{ fontSize: 10, color: '#3D5A7A', marginLeft: 4 }}>({formatHour(slot.startH)}–{formatHour(slot.endH)})</span>
                 </div>
                 {slotSessions.map(s => (
-                  <SessionCard key={s.id} session={s} onUpdate={updateSession} isPast={isPast(selectedDate)} />
+                  <SessionCard key={s.id} session={s} onUpdate={handleSessionUpdate} isPast={isPast(selectedDate)} />
                 ))}
               </div>
             );

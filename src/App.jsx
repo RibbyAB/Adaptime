@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
 import { useTasks, useSchedules, useEnergy, useSessions, useWorkCap } from './hooks/useFirestore';
@@ -42,7 +42,7 @@ export default function App() {
   const { tasks,     addTask,     updateTask,     deleteTask     } = useTasks(user?.uid);
   const { schedules, addSchedule, updateSchedule, deleteSchedule } = useSchedules(user?.uid);
   const { energy: energySettings, setEnergy                      } = useEnergy(user?.uid);
-  const { sessions,  replaceAllSessions, updateSession, deleteSession } = useSessions(user?.uid);
+  const { sessions, loading: sessionsLoading, replaceAllSessions, updateSession, deleteSession } = useSessions(user?.uid);
   const { workCap,   setWorkCap, getCapMap, defaultCap           } = useWorkCap(user?.uid);
 
   const overdueKey = useMemo(
@@ -85,15 +85,31 @@ export default function App() {
     }
   }, [user, tasks, schedules, energySettings, getCapMap, replaceAllSessions]);
 
-  const uid         = user?.uid;
-  const tasksLen    = tasks.length;
-  const schedulesLen = schedules.length;
+  // ── Stable reschedule trigger ──
+  // We hash task/schedule content so reschedule only fires when they actually change,
+  // not when sessions update (which would cause an infinite loop).
+  const taskHash = useMemo(
+    () => tasks.map(t => `${t.id}:${t.deadline}:${t.hours}:${t.difficulty}`).sort().join('|'),
+    [tasks]
+  );
+  const schedHash = useMemo(
+    () => schedules.map(s => `${s.id}:${s.day}:${s.startTime}:${s.endTime}`).sort().join('|'),
+    [schedules]
+  );
+  const energyHash = useMemo(
+    () => energySettings ? JSON.stringify(energySettings) : '',
+    [energySettings]
+  );
+
+  const prevHashRef = useRef('');
 
   useEffect(() => {
-    if (uid && tasksLen > 0 && energySettings && !rescheduling) {
-      doReschedule();
-    }
-  }, [uid, tasksLen, schedulesLen]);
+    if (!user?.uid || tasks.length === 0 || !energySettings) return;
+    const hash = `${taskHash}||${schedHash}||${energyHash}`;
+    if (hash === prevHashRef.current) return; // nothing changed
+    prevHashRef.current = hash;
+    doReschedule();
+  }, [user?.uid, taskHash, schedHash, energyHash]);
 
   const handleLogout = () => signOut(auth);
 
@@ -150,6 +166,7 @@ export default function App() {
         {view === 'tasks' && (
           <Tasks
             tasks={tasks}
+            sessions={sessions}
             addTask={addTask}
             updateTask={updateTask}
             deleteTask={deleteTask}
@@ -178,6 +195,7 @@ export default function App() {
         {view === 'calendar' && (
           <CalendarView
             {...sharedProps}
+            sessionsLoading={sessionsLoading}
             updateSession={updateSession}
             deleteSession={deleteSession}
             updateTask={updateTask}

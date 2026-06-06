@@ -119,6 +119,11 @@ export function runScheduler(
   if (!energy || !tasks || !fixedSchedules) return { scheduled: [], warnings: [] };
   const today  = new Date(todayISO + 'T00:00:00');
   const result = [];
+  // Current time used to avoid scheduling NEW tasks in past slots on today
+  const nowDate  = new Date();
+  const nowISO   = isoDate(nowDate);
+  const nowHour  = nowDate.getHours() + nowDate.getMinutes() / 60;
+  const nowHourRounded = Math.ceil(nowHour * 2) / 2; // round up to nearest 30 min
   const warnings = [];
 
   const sortedTasks = [...tasks]
@@ -170,8 +175,11 @@ export function runScheduler(
       const eB = (energy && energy[b.key]) || 3;
       const diffA = Math.abs(task.difficulty - eA);
       const diffB = Math.abs(task.difficulty - eB);
-      const scoreA = (diffA === 0 ? 5 : diffA === 1 ? 3 : 1) + (a.key === task.timePref ? 1 : 0);
-      const scoreB = (diffB === 0 ? 5 : diffB === 1 ? 3 : 1) + (b.key === task.timePref ? 1 : 0);
+      // 'anytime' means no slot preference — don't boost any particular slot
+      const prefBoostA = task.timePref === 'anytime' ? 0 : (a.key === task.timePref ? 1 : 0);
+      const prefBoostB = task.timePref === 'anytime' ? 0 : (b.key === task.timePref ? 1 : 0);
+      const scoreA = (diffA === 0 ? 5 : diffA === 1 ? 3 : 1) + prefBoostA;
+      const scoreB = (diffB === 0 ? 5 : diffB === 1 ? 3 : 1) + prefBoostB;
       return scoreB - scoreA;
     });
 
@@ -188,6 +196,11 @@ export function runScheduler(
 
       if (ds.workHoursUsed >= ds.cap) continue;
 
+      // Only restrict to current time for tasks created today; existing tasks are unaffected
+      const taskCreatedToday = dISO === nowISO && task.createdAt &&
+        isoDate(new Date(task.createdAt)) === nowISO;
+      const effectiveMinStart = taskCreatedToday ? nowHourRounded : 0;
+
       for (const slot of rankedSlots) {
         if (hoursLeft < MIN_SESSION) break;
         if (ds.workHoursUsed >= ds.cap) break;
@@ -196,13 +209,14 @@ export function runScheduler(
         if (currentEnergy < 0.05) continue;
 
         const capRemaining   = ds.cap - ds.workHoursUsed;
-        const slotRemaining  = slot.endH - ds.slotCursors[slot.key];
+        const effectiveCursor = Math.max(ds.slotCursors[slot.key], effectiveMinStart);
+        const slotRemaining  = slot.endH - effectiveCursor;
         if (slotRemaining < MIN_SESSION) continue;
 
         let sessionH = Math.min(hoursLeft, capRemaining, slotRemaining, MAX_SESSION);
         if (sessionH < MIN_SESSION) continue;
 
-        const startH = getNextFreeWindow(slot, blocked[dk], ds.slotCursors[slot.key], sessionH);
+        const startH = getNextFreeWindow(slot, blocked[dk], effectiveCursor, sessionH);
         if (startH === null) continue;
 
         const actualRoom = Math.min(slot.endH, startH + sessionH) - startH;

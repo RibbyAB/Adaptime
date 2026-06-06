@@ -12,12 +12,18 @@ const FILTERS = [
   ['overdue', 'Overdue'],
 ];
 
-export default function Tasks({ tasks, addTask, updateTask, deleteTask }) {
+export default function Tasks({ tasks, sessions = [], addTask, updateTask, deleteTask }) {
   const [filter, setFilter] = useState('all');
   const [modal, setModal] = useState(null);
   const [deleting, setDeleting] = useState(null);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = (() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  })();
 
   const counts = {
     all: tasks.length,
@@ -101,6 +107,16 @@ export default function Tasks({ tasks, addTask, updateTask, deleteTask }) {
                   </span>
                 <span style={{ color: diffColor(t.difficulty) }}>◆ {diffLabel(t.difficulty)}</span>
                 <span>⏱ {t.hours}j</span>
+                {(() => {
+                  const taskSessions = sessions.filter(s => s.taskId === t.id);
+                  if (taskSessions.length === 0) return null;
+                  const doneSessions = taskSessions.filter(s => s.isDone).length;
+                  return (
+                    <span style={{ color: doneSessions === taskSessions.length ? '#10B981' : '#60A5FA' }}>
+                      📋 {doneSessions}/{taskSessions.length} sesi
+                    </span>
+                  );
+                })()}
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>

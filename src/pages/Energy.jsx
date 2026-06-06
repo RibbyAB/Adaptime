@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { energyColor } from '../utils/helpers';
 
 const SLOTS = [
@@ -23,8 +23,15 @@ export default function Energy({ energySettings = {}, setEnergySettings, workCap
   const [overrideCap, setOverrideCap] = useState(8);
   const [saving, setSaving]           = useState(false);
 
+  const rescheduleTimerRef = useRef(null);
+
   const update = async (k, v) => {
     await setEnergySettings({ ...energySettings, [k]: v });
+    // Debounce reschedule — wait 1.5s after last slider move
+    if (rescheduleTimerRef.current) clearTimeout(rescheduleTimerRef.current);
+    rescheduleTimerRef.current = setTimeout(() => {
+      onReschedule?.();
+    }, 1500);
   };
 
   // BUG FIX: await onReschedule so UI doesn't flash inconsistently
