@@ -1,3 +1,5 @@
+import { checkFeasibility } from './helpers';
+
 export const SLOT_DEFINITIONS = [
   { key: 'morning',   startH: 6,  endH: 12, label: 'Pagi',  icon: '🌅' },
   { key: 'afternoon', startH: 12, endH: 17, label: 'Siang', icon: '☀️' },
@@ -121,14 +123,33 @@ export function runScheduler(
   const result = [];
   const warnings = [];
 
+  // ── Feasibility Pre-filter ─────────────────────────────────────────────────
+  // Sebelum dijadwalkan, cek apakah setiap task masih mungkin diselesaikan
+  // sebelum deadline berdasarkan waktu saat ini.
+  // Task yang tidak feasible:
+  //   1. Tidak dimasukkan ke scheduler (dibuang dari sortedTasks)
+  //   2. Dikumpulkan di infeasibleTaskIds agar App.jsx bisa update status-nya
+  const infeasibleTaskIds = [];
+
   const sortedTasks = [...tasks]
-    .filter(t => t.status === 'pending' || t.status === 'in-progress')
+    .filter(t => {
+      if (t.status !== 'pending' && t.status !== 'in-progress') return false;
+
+      const { feasible } = checkFeasibility(t.deadline, t.hours || 1);
+      if (!feasible) {
+        // Catat ID-nya — App.jsx akan set status mereka ke 'overdue'
+        infeasibleTaskIds.push(t.id);
+        return false; // buang dari jadwal
+      }
+      return true;
+    })
     .sort((a, b) => {
       const da = new Date(a.deadline);
       const db = new Date(b.deadline);
       if (da - db !== 0) return da - db;
       return b.difficulty - a.difficulty;
     });
+  // ──────────────────────────────────────────────────────────────────────────
 
   const blocked = buildBlocked(fixedSchedules, today, lookaheadDays);
 
@@ -267,7 +288,7 @@ export function runScheduler(
     }
   }
 
-  return { scheduled: result, warnings };
+  return { scheduled: result, warnings, infeasibleTaskIds };
 }
 
 export { SLOT_DEFINITIONS as SLOTS };

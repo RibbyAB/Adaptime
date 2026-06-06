@@ -64,26 +64,46 @@ export default function App() {
     if (!user?.uid || tasks.length === 0) return;
     
     setRescheduling(true);
-    const startTime = Date.now(); // Catat waktu mulai
+    const startTime = Date.now();
     
     try {
       const todayISO = isoDate(new Date());
       const capMap = (getCapMap ? getCapMap() : null) ?? {};
-      const { scheduled } = runScheduler(tasks, schedules, energySettings, todayISO, 14, capMap);
+
+      // scheduler sekarang juga mengembalikan infeasibleTaskIds —
+      // yaitu task pending/in-progress yang durasinya tidak muat sebelum deadline
+      const { scheduled, infeasibleTaskIds } = runScheduler(
+        tasks, schedules, energySettings, todayISO, 14, capMap
+      );
+
+      // ── Update status task yang tidak feasible ke 'overdue' ──────────────
+      // Jalankan paralel untuk efisiensi, tapi batasi hanya task yang
+      // belum overdue agar tidak trigger write Firestore yang tidak perlu
+      if (infeasibleTaskIds.length > 0 && updateTask) {
+        const updatePromises = infeasibleTaskIds
+          .filter(id => {
+            const t = tasks.find(t => t.id === id);
+            return t && t.status !== 'overdue'; // hindari write duplikat
+          })
+          .map(id => updateTask(id, { status: 'overdue' }));
+
+        await Promise.all(updatePromises);
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       await replaceAllSessions(scheduled);
     } catch (err) {
       console.error('Reschedule failed:', err);
     } finally {
-      // Patokan: Hitung selisih waktu
       const elapsed = Date.now() - startTime;
-      const minDuration = 1500; // Minimal 1.5 detik
+      const minDuration = 1500;
       const delay = Math.max(0, minDuration - elapsed);
       
       setTimeout(() => {
         setRescheduling(false);
       }, delay);
     }
-  }, [user, tasks, schedules, energySettings, getCapMap, replaceAllSessions]);
+  }, [user, tasks, schedules, energySettings, getCapMap, replaceAllSessions, updateTask]);
 
   const uid         = user?.uid;
   const tasksLen    = tasks.length;

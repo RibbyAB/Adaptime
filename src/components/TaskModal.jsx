@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { diffColor, diffLabel } from '../utils/helpers';
+import { diffColor, diffLabel, checkFeasibility } from '../utils/helpers';
 
 const PREF_SESSION_OPTIONS = [
   { value: null,  label: 'Auto (sistem pilihkan)' },
@@ -70,11 +70,35 @@ export default function TaskModal({ task, onSave, onClose }) {
 
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
 
+  // Hitung feasibility setiap kali deadline atau jam berubah untuk preview warning
+  const totalHoursPreview = (parseInt(f.hours) || 0) + (parseInt(f.minutes) || 0) / 60;
+  const feasibilityPreview = f.deadline && totalHoursPreview > 0
+    ? checkFeasibility(f.deadline, totalHoursPreview)
+    : null;
+
   const save = () => {
     if (!f.name.trim()) { alert('Nama task wajib diisi!'); return; }
     if (!f.deadline) { alert('Deadline wajib diisi!'); return; }
     const totalHours = (parseInt(f.hours) || 0) + (parseInt(f.minutes) || 0) / 60;
     if (totalHours < 0.25) { alert('Estimasi waktu minimal 15 menit!'); return; }
+
+    // ── Feasibility Check ──────────────────────────────────────────────────────
+    // Jangan jalankan jika task sudah done (tidak perlu dicek ulang)
+    const isAlreadyDone = f.status === 'done';
+    if (!isAlreadyDone) {
+      const { feasible, remainingHours } = checkFeasibility(f.deadline, totalHours);
+      if (!feasible) {
+        // Langsung set status overdue, tidak perlu konfirmasi karena ini fakta
+        onSave({
+          ...f,
+          hours:  Math.round(totalHours * 100) / 100,
+          status: 'overdue',
+        });
+        return;
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     onSave({ ...f, hours: Math.round(totalHours * 100) / 100 });
   };
 
@@ -228,6 +252,25 @@ export default function TaskModal({ task, onSave, onClose }) {
               )}
             </div>
           </>
+        )}
+
+        {/* Feasibility warning — muncul real-time saat deadline & durasi diisi */}
+        {feasibilityPreview && !feasibilityPreview.feasible && f.status !== 'done' && (
+          <div style={{
+            margin: '8px 0',
+            padding: '10px 14px',
+            background: 'rgba(239,68,68,0.10)',
+            border: '1px solid rgba(239,68,68,0.35)',
+            borderRadius: 8,
+            fontSize: 12,
+            color: '#FCA5A5',
+            lineHeight: 1.6,
+          }}>
+            <strong>⚠️ Task Tidak Feasible</strong><br />
+            Sisa waktu hingga deadline: <strong>{feasibilityPreview.remainingHours.toFixed(1)} jam</strong>,
+            sedangkan estimasi task: <strong>{feasibilityPreview.neededHours.toFixed(1)} jam</strong>.<br />
+            Task ini akan otomatis disimpan sebagai <strong>Overdue</strong> dan tidak akan dijadwalkan.
+          </div>
         )}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
