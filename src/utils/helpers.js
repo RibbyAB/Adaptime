@@ -10,14 +10,9 @@ export const energyColor = (lv) =>
 export const daysLeft = (deadline) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
   const deadlineDate = new Date(deadline + 'T00:00:00');
   deadlineDate.setHours(0, 0, 0, 0);
-
-  const diffTime = deadlineDate - today;
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-  return diffDays;
+  return Math.ceil((deadlineDate - today) / (1000 * 60 * 60 * 24));
 };
 
 export const statusBadge = (status) => {
@@ -38,3 +33,22 @@ export const typeBadge = (type) => {
   };
   return map[type] ?? { cls: 'badge-kelas', label: type };
 };
+
+/**
+ * Cek apakah task masih bisa diselesaikan sebelum deadline.
+ * Deadline dianggap akhir hari (23:59:59).
+ */
+export function checkFeasibility(deadline, hours) {
+  if (!deadline || !hours || hours <= 0) {
+    return { feasible: true, remainingHours: Infinity, neededHours: hours || 0 };
+  }
+  const now            = new Date();
+  const deadlineEnd    = new Date(deadline + 'T23:59:59');
+  const remainingMs    = deadlineEnd - now;
+  const remainingHours = remainingMs / (1000 * 60 * 60);
+  return {
+    feasible:        remainingHours >= hours,
+    remainingHours:  Math.round(remainingHours * 100) / 100,
+    neededHours:     hours,
+  };
+}

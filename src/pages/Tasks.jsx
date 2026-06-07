@@ -12,18 +12,21 @@ const FILTERS = [
   ['overdue', 'Overdue'],
 ];
 
+function formatHours(h) {
+  const totalMin = Math.round((h || 0) * 60);
+  const hours = Math.floor(totalMin / 60);
+  const mins  = totalMin % 60;
+  if (hours > 0 && mins > 0) return `${hours}j ${mins}m`;
+  if (hours > 0) return `${hours}j`;
+  return `${mins}m`;
+}
+
 export default function Tasks({ tasks, sessions = [], addTask, updateTask, deleteTask }) {
   const [filter, setFilter] = useState('all');
   const [modal, setModal] = useState(null);
   const [deleting, setDeleting] = useState(null);
 
-  const today = (() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  })();
+  const today = new Date().toISOString().split('T')[0];
 
   const counts = {
     all: tasks.length,
@@ -106,7 +109,7 @@ export default function Tasks({ tasks, sessions = [], addTask, updateTask, delet
                       : (dl < 0 ? `⚠️ ${-dl}h terlambat` : dl === 0 ? '🔥 Hari ini!' : dl === 1 ? '⏰ Besok' : `${dl}h lagi`)}
                   </span>
                 <span style={{ color: diffColor(t.difficulty) }}>◆ {diffLabel(t.difficulty)}</span>
-                <span>⏱ {t.hours}j</span>
+                <span>⏱ {formatHours(t.hours)}</span>
                 {(() => {
                   const taskSessions = sessions.filter(s => s.taskId === t.id);
                   if (taskSessions.length === 0) return null;
@@ -164,6 +167,7 @@ export default function Tasks({ tasks, sessions = [], addTask, updateTask, delet
       {modal && (
         <TaskModal
           task={modal === 'add' ? null : modal}
+          sessions={sessions}
           onSave={saveTask}
           onClose={() => setModal(null)}
         />

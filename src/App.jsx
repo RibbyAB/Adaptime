@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
-import { useTasks, useSchedules, useEnergy, useSessions, useWorkCap } from './hooks/useFirestore';
-import { runScheduler } from './utils/scheduler';
+import { useTasks, useSchedules, useEnergy, useSessions, useWorkCap, useSchedulingPrefs } from './hooks/useFirestore';
+import { runScheduler, findNextAvailableSlot } from './utils/scheduler';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
@@ -14,8 +14,8 @@ import CalendarView from './pages/CalendarView';
 import Profile from './pages/Profile';
 
 function isoDate(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const y   = d.getFullYear();
+  const m   = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
@@ -23,33 +23,29 @@ function isoDate(d) {
 export default function App() {
   const [user, setUser]               = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [view, setView] = useState(() => {
-    return localStorage.getItem('lastView') || 'dashboard';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('lastView', view);
-  }, [view]);
+  const [view, setView] = useState(() => localStorage.getItem('lastView') || 'dashboard');
   const [rescheduling, setRescheduling] = useState(false);
+  const [showInfeasiblePopup, setShowInfeasiblePopup] = useState(false);
+  const [pendingInfeasibleIds, setPendingInfeasibleIds] = useState([]);
+
+  useEffect(() => { localStorage.setItem('lastView', view); }, [view]);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, u => {
-      setUser(u);
-      setAuthLoading(false);
-    });
+    return onAuthStateChanged(auth, u => { setUser(u); setAuthLoading(false); });
   }, []);
 
   const { tasks,     addTask,     updateTask,     deleteTask     } = useTasks(user?.uid);
   const { schedules, addSchedule, updateSchedule, deleteSchedule } = useSchedules(user?.uid);
   const { energy: energySettings, setEnergy                      } = useEnergy(user?.uid);
   const { sessions, loading: sessionsLoading, replaceAllSessions, updateSession, deleteSession } = useSessions(user?.uid);
-  const { workCap,   setWorkCap, getCapMap, defaultCap           } = useWorkCap(user?.uid);
+  const { workCap,  setWorkCap, getCapMap, defaultCap            } = useWorkCap(user?.uid);
+  const { prefs,    setPrefs                                      } = useSchedulingPrefs(user?.uid);
 
+  // ── Auto-overdue: tasks past deadline flip to overdue ──
   const overdueKey = useMemo(
     () => tasks.map(t => `${t.id}:${t.status}:${t.deadline}`).join(','),
     [tasks]
   );
-
   useEffect(() => {
     if (!tasks.length || !updateTask) return;
     const today = isoDate(new Date());
@@ -58,36 +54,98 @@ export default function App() {
         updateTask(t.id, { status: 'overdue' });
       }
     });
-  }, [overdueKey, updateTask]);
+  }, [overdueKey]);
 
+  // ── Core reschedule ──────────────────────────────────────────────────────────
   const doReschedule = useCallback(async () => {
     if (!user?.uid || tasks.length === 0) return;
-    
     setRescheduling(true);
-    const startTime = Date.now(); // Catat waktu mulai
-    
+    const startTime = Date.now();
     try {
-      const todayISO = isoDate(new Date());
-      const capMap = (getCapMap ? getCapMap() : null) ?? {};
-      const { scheduled } = runScheduler(tasks, schedules, energySettings, todayISO, 14, capMap);
+      const todayISO  = isoDate(new Date());
+      const capMap    = getCapMap ? getCapMap() : {};
+      const { scheduled, infeasibleTaskIds } = runScheduler(
+        tasks,
+        schedules,
+        energySettings,
+        todayISO,
+        14,
+        capMap,
+        prefs.overduePriority || 'unset',
+        sessions  // pass existing sessions for state preservation
+      );
+
+      // Handle infeasible tasks
+      if (infeasibleTaskIds.length > 0 && updateTask) {
+        // Mark as overdue in Firestore (only if not already)
+        const updates = infeasibleTaskIds
+          .filter(id => { const t = tasks.find(t => t.id === id); return t && t.status !== 'overdue'; })
+          .map(id => updateTask(id, { status: 'overdue' }));
+        await Promise.all(updates);
+
+        // Show one-time popup if preference is unset
+        if (prefs.overduePriority === 'unset' && !prefs.infeasiblePopupSeen) {
+          setPendingInfeasibleIds(infeasibleTaskIds);
+          setShowInfeasiblePopup(true);
+        }
+      }
+
       await replaceAllSessions(scheduled);
     } catch (err) {
       console.error('Reschedule failed:', err);
     } finally {
-      // Patokan: Hitung selisih waktu
-      const elapsed = Date.now() - startTime;
-      const minDuration = 1500; // Minimal 1.5 detik
-      const delay = Math.max(0, minDuration - elapsed);
-      
-      setTimeout(() => {
-        setRescheduling(false);
-      }, delay);
+      const elapsed     = Date.now() - startTime;
+      const minDuration = 1500;
+      setTimeout(() => setRescheduling(false), Math.max(0, minDuration - elapsed));
     }
-  }, [user, tasks, schedules, energySettings, getCapMap, replaceAllSessions]);
+  }, [user, tasks, schedules, energySettings, getCapMap, replaceAllSessions, prefs, sessions, updateTask]);
 
-  // ── Stable reschedule trigger ──
-  // We hash task/schedule content so reschedule only fires when they actually change,
-  // not when sessions update (which would cause an infinite loop).
+  // ── Catch-up session: when user un-checks a past session ────────────────────
+  const handleUncheckedPastSession = useCallback(async (session) => {
+    const todayISO   = isoDate(new Date());
+    const capMap     = getCapMap ? getCapMap() : {};
+    const hoursNeeded = session.endH - session.startH;
+
+    const slot = findNextAvailableSlot(
+      hoursNeeded,
+      schedules,
+      energySettings,
+      sessions,
+      todayISO,
+      14,
+      capMap
+    );
+
+    if (slot) {
+      // Create a new catch-up session
+      await replaceAllSessions([
+        ...sessions.filter(s => s.id !== session.id),
+        {
+          taskId:       session.taskId,
+          taskName:     session.taskName,
+          difficulty:   session.difficulty,
+          day:          slot.day,
+          date:         slot.date,
+          slotKey:      slot.slotKey,
+          slotLabel:    slot.slotLabel,
+          slotIcon:     slot.slotIcon,
+          startH:       slot.startH,
+          endH:         slot.endH,
+          sessionNum:   session.sessionNum,
+          totalSessions: session.totalSessions,
+          energyLevel:  slot.energyLevel,
+          isDone:       false,
+          note:         '',
+          checklist:    [],
+        },
+      ]);
+    } else {
+      // No slot found — full reschedule
+      await doReschedule();
+    }
+  }, [schedules, energySettings, sessions, getCapMap, replaceAllSessions, doReschedule]);
+
+  // ── Stable reschedule trigger ────────────────────────────────────────────────
   const taskHash = useMemo(
     () => tasks.map(t => `${t.id}:${t.deadline}:${t.hours}:${t.difficulty}`).sort().join('|'),
     [tasks]
@@ -100,13 +158,12 @@ export default function App() {
     () => energySettings ? JSON.stringify(energySettings) : '',
     [energySettings]
   );
-
   const prevHashRef = useRef('');
 
   useEffect(() => {
     if (!user?.uid || tasks.length === 0 || !energySettings) return;
     const hash = `${taskHash}||${schedHash}||${energyHash}`;
-    if (hash === prevHashRef.current) return; // nothing changed
+    if (hash === prevHashRef.current) return;
     prevHashRef.current = hash;
     doReschedule();
   }, [user?.uid, taskHash, schedHash, energyHash]);
@@ -116,6 +173,18 @@ export default function App() {
   const handleApplyEnergyResult = async (result) => {
     await setEnergy(result);
     await doReschedule();
+  };
+
+  // ── Infeasible popup handlers ────────────────────────────────────────────────
+  const handleSetPriority = async (priority) => {
+    await setPrefs({ overduePriority: priority, infeasiblePopupSeen: true });
+    setShowInfeasiblePopup(false);
+    await doReschedule();
+  };
+
+  const handleDismissPopup = async () => {
+    await setPrefs({ infeasiblePopupSeen: true });
+    setShowInfeasiblePopup(false);
   };
 
   if (authLoading) {
@@ -129,12 +198,8 @@ export default function App() {
   if (!user) return <Auth />;
 
   const sharedProps = {
-    tasks,
-    schedules,
-    energy: energySettings,
-    sessions,
-    onReschedule: doReschedule,
-    rescheduling,
+    tasks, schedules, energy: energySettings, sessions,
+    onReschedule: doReschedule, rescheduling,
   };
 
   return (
@@ -148,6 +213,64 @@ export default function App() {
             padding: '8px 0', textAlign: 'center', fontSize: 13, color: '#60A5FA',
           }}>
             ⚡ Menjadwalkan ulang...
+          </div>
+        )}
+
+        {/* ── One-time infeasible popup ── */}
+        {showInfeasiblePopup && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{
+              background: '#0A1528', border: '1px solid rgba(245,158,11,0.3)',
+              borderRadius: 14, padding: 28, maxWidth: 440, width: '90%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+            }}>
+              <div style={{ fontSize: 28, marginBottom: 10 }}>⚠️</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#FCD34D', marginBottom: 8 }}>
+                Ada Task yang Tidak Bisa Dijadwalkan
+              </div>
+              <div style={{ fontSize: 13, color: '#7BA5C8', lineHeight: 1.6, marginBottom: 20 }}>
+                {pendingInfeasibleIds.length} task sudah melewati atau tidak cukup waktu sebelum deadline-nya.
+                Sistem bisa mengutamakan task-task ini, atau tetap fokus ke task yang masih tepat waktu.
+              </div>
+              <div style={{ fontSize: 12, color: '#4B6A8A', marginBottom: 16, fontStyle: 'italic' }}>
+                Kamu bisa mengubah preferensi ini kapan saja di halaman Analytics.
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  onClick={() => handleSetPriority('overdue')}
+                  style={{
+                    padding: '11px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                    background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+                    color: '#FCD34D', textAlign: 'left',
+                  }}
+                >
+                  ⏫ Utamakan task overdue — jadwalkan mereka lebih dulu
+                </button>
+                <button
+                  onClick={() => handleSetPriority('current')}
+                  style={{
+                    padding: '11px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                    background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)',
+                    color: '#60A5FA', textAlign: 'left',
+                  }}
+                >
+                  📅 Utamakan task tepat waktu — fokus ke yang masih bisa diselesaikan
+                </button>
+                <button
+                  onClick={handleDismissPopup}
+                  style={{
+                    padding: '9px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 12,
+                    background: 'transparent', border: '1px solid rgba(59,130,246,0.1)',
+                    color: '#4B6A8A',
+                  }}
+                >
+                  Nanti saja — biarkan sistem memutuskan
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -199,16 +322,19 @@ export default function App() {
             updateSession={updateSession}
             deleteSession={deleteSession}
             updateTask={updateTask}
+            onUncheckedPastSession={handleUncheckedPastSession}
           />
         )}
         {view === 'analytics' && (
-          <Analytics {...sharedProps} />
+          <Analytics
+            {...sharedProps}
+            prefs={prefs}
+            setPrefs={setPrefs}
+            onReschedule={doReschedule}
+          />
         )}
         {view === 'profile' && (
-          <Profile
-            user={user}
-            onApplyEnergyResult={handleApplyEnergyResult}
-          />
+          <Profile user={user} onApplyEnergyResult={handleApplyEnergyResult} />
         )}
       </div>
     </div>

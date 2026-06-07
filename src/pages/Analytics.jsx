@@ -9,34 +9,54 @@ function isoDate(d) {
 }
 
 function getWeekRange() {
-  const now = new Date();
-  const day = now.getDay();
+  const now  = new Date();
+  const day  = now.getDay();
   const diff = day === 0 ? -6 : 1 - day;
-  const mon = new Date(now); mon.setDate(now.getDate() + diff); mon.setHours(0,0,0,0);
-  const sun = new Date(mon); sun.setDate(mon.getDate() + 6); sun.setHours(23,59,59,999);
+  const mon  = new Date(now); mon.setDate(now.getDate() + diff); mon.setHours(0,0,0,0);
+  const sun  = new Date(mon); sun.setDate(mon.getDate() + 6);   sun.setHours(23,59,59,999);
   return { start: isoDate(mon), end: isoDate(sun) };
 }
 
 function getMonthRange() {
-  const now = new Date();
+  const now   = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   const end   = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   return { start: isoDate(start), end: isoDate(end) };
 }
 
-export default function Analytics({ tasks = [], schedules = [], energy = {}, sessions = [] }) {
-  const [filter, setFilter] = useState('all'); // 'all' | 'week' | 'month'
+const PRIORITY_OPTIONS = [
+  {
+    value: 'unset',
+    label: 'Biarkan Sistem Memutuskan',
+    desc:  'Sistem akan mengabaikan task yang sudah tidak feasible, dan memberi tahu kamu jika ada.',
+    icon:  '⚙️',
+    color: '#4B6A8A',
+  },
+  {
+    value: 'overdue',
+    label: 'Utamakan Task Overdue',
+    desc:  'Task yang sudah melewati deadline dijadwalkan lebih dulu sebagai sesi catch-up.',
+    icon:  '⏫',
+    color: '#F59E0B',
+  },
+  {
+    value: 'current',
+    label: 'Utamakan Task Tepat Waktu',
+    desc:  'Fokus ke task yang masih bisa selesai sebelum deadline. Task overdue dikesampingkan.',
+    icon:  '📅',
+    color: '#10B981',
+  },
+];
 
-  // Filter tasks by date range
+export default function Analytics({ tasks = [], schedules = [], energy = {}, sessions = [], prefs = {}, setPrefs, onReschedule }) {
+  const [filter, setFilter]         = useState('all');
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [savingPriority, setSavingPriority] = useState(false);
+
   const filterRange = filter === 'week' ? getWeekRange() : filter === 'month' ? getMonthRange() : null;
 
-  const filteredTasks = filterRange
-    ? tasks.filter(t => t.deadline >= filterRange.start && t.deadline <= filterRange.end)
-    : tasks;
-
-  const filteredSessions = filterRange
-    ? sessions.filter(s => s.date >= filterRange.start && s.date <= filterRange.end)
-    : sessions;
+  const filteredTasks    = filterRange ? tasks.filter(t => t.deadline >= filterRange.start && t.deadline <= filterRange.end) : tasks;
+  const filteredSessions = filterRange ? sessions.filter(s => s.date >= filterRange.start && s.date <= filterRange.end) : sessions;
 
   const total   = filteredTasks.length;
   const done    = filteredTasks.filter(t => t.status === 'done').length;
@@ -48,22 +68,21 @@ export default function Analytics({ tasks = [], schedules = [], energy = {}, ses
   const weekDone  = tasks.filter(t => t.status === 'done' && t.deadline >= weekRange.start && t.deadline <= weekRange.end).length;
 
   const timeProd = ['morning', 'afternoon', 'evening', 'night'].map(tp => ({
-    lbl:  { morning: 'Pagi', afternoon: 'Siang', evening: 'Sore', night: 'Malam' }[tp],
-    icon: { morning: '🌅', afternoon: '☀️', evening: '🌆', night: '🌙' }[tp],
+    lbl:   { morning: 'Pagi', afternoon: 'Siang', evening: 'Sore', night: 'Malam' }[tp],
+    icon:  { morning: '🌅', afternoon: '☀️', evening: '🌆', night: '🌙' }[tp],
     done:  filteredTasks.filter(t => t.timePref === tp && t.status === 'done').length,
     total: filteredTasks.filter(t => t.timePref === tp).length,
   }));
 
-  const diffData = [1, 2, 3, 4, 5].map(d => ({
+  const diffData  = [1,2,3,4,5].map(d => ({
     lbl: diffLabel(d), d,
     cnt: filteredTasks.filter(t => t.difficulty === d).length,
     color: diffColor(d),
   }));
 
-  const maxBar = Math.max(...timeProd.map(t => t.total), 1);
-  const mostProductiveTime = [...timeProd].sort((a, b) => b.done - a.done)[0];
-
-  const totalHours = filteredSessions.reduce((acc, s) => acc + (s.endH - s.startH), 0);
+  const maxBar              = Math.max(...timeProd.map(t => t.total), 1);
+  const mostProductiveTime  = [...timeProd].sort((a, b) => b.done - a.done)[0];
+  const totalHours          = filteredSessions.reduce((acc, s) => acc + (s.endH - s.startH), 0);
 
   const summaryCards = [
     { lbl: 'Total Task',      v: total,      c: '#60A5FA', i: '📋' },
@@ -73,70 +92,40 @@ export default function Analytics({ tasks = [], schedules = [], energy = {}, ses
   ];
 
   const insights = [
-    {
-      i: '🎯', t: 'Jam Paling Produktif',
-      d: mostProductiveTime?.done > 0
-        ? `Waktu ${mostProductiveTime.lbl} paling banyak task diselesaikan (${mostProductiveTime.done} task)`
-        : 'Belum ada data produktivitas',
-    },
-    {
-      i: '📉', t: 'Perlu Ditingkatkan',
-      d: overdue > 0 ? `${overdue} task sudah overdue, perlu diselesaikan segera!` : 'Tidak ada task overdue 🎉',
-    },
-    {
-      i: '⚡', t: 'Task Berat Tersisa',
-      d: `${tasks.filter(t => t.difficulty >= 4 && t.status === 'pending').length} task sulit/sangat sulit masih pending`,
-    },
-    {
-      i: '🗓️', t: 'Smart Schedule',
-      d: `${filteredSessions.length} sesi terjadwal, total ${Math.round(totalHours * 10) / 10} jam`,
-    },
-    {
-      i: '📅', t: 'Task Selesai Minggu Ini',
-      d: `${weekDone} task berhasil diselesaikan minggu berjalan`,
-    },
-    {
-      i: '⏱️', t: 'Rata-rata Produktivitas',
-      d: total > 0
-        ? `${rate}% completion rate — ${rate >= 70 ? 'sangat baik!' : rate >= 40 ? 'cukup baik, terus tingkatkan' : 'perlu peningkatan'}`
-        : 'Belum ada data',
-    },
+    { i: '🎯', t: 'Jam Paling Produktif',   d: mostProductiveTime?.done > 0 ? `Waktu ${mostProductiveTime.lbl} paling banyak task diselesaikan (${mostProductiveTime.done} task)` : 'Belum ada data produktivitas' },
+    { i: '📉', t: 'Perlu Ditingkatkan',      d: overdue > 0 ? `${overdue} task sudah overdue, perlu diselesaikan segera!` : 'Tidak ada task overdue 🎉' },
+    { i: '⚡', t: 'Task Berat Tersisa',      d: `${tasks.filter(t => t.difficulty >= 4 && t.status === 'pending').length} task sulit/sangat sulit masih pending` },
+    { i: '🗓️', t: 'Smart Schedule',          d: `${filteredSessions.length} sesi terjadwal, total ${Math.round(totalHours * 10) / 10} jam` },
+    { i: '📅', t: 'Task Selesai Minggu Ini', d: `${weekDone} task berhasil diselesaikan minggu berjalan` },
+    { i: '⏱️', t: 'Rata-rata Produktivitas', d: total > 0 ? `${rate}% completion rate — ${rate >= 70 ? 'sangat baik!' : rate >= 40 ? 'cukup baik, terus tingkatkan' : 'perlu peningkatan'}` : 'Belum ada data' },
   ];
 
   const exportCSV = () => {
     const header = 'Nama Task,Deadline,Difficulty,Status,Preferensi Waktu,Estimasi Jam';
-    const rows = filteredTasks.map(t =>
-      `"${t.name}","${t.deadline}",${t.difficulty},"${t.status}","${t.timePref}",${t.hours}`
-    );
-    const csv = [header, ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url;
-    a.download = `adaptime-analytics-${isoDate(new Date())}.csv`;
-    a.click();
+    const rows   = filteredTasks.map(t => `"${t.name}","${t.deadline}",${t.difficulty},"${t.status}","${t.timePref}",${t.hours}`);
+    const csv    = [header, ...rows].join('\n');
+    const blob   = new Blob([csv], { type: 'text/csv' });
+    const url    = URL.createObjectURL(blob);
+    const a      = document.createElement('a'); a.href = url; a.download = `adaptime-analytics-${isoDate(new Date())}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 
-  // Export to JSON
   const exportJSON = () => {
-    const data = {
-      exportedAt: new Date().toISOString(),
-      filter,
-      summary: { total, done, overdue, completionRate: rate, totalScheduledHours: Math.round(totalHours * 10) / 10 },
-      tasks: filteredTasks.map(t => ({ name: t.name, deadline: t.deadline, difficulty: t.difficulty, status: t.status, hours: t.hours })),
-      sessions: filteredSessions.length,
-    };
+    const data = { exportedAt: new Date().toISOString(), filter, summary: { total, done, overdue, completionRate: rate, totalScheduledHours: Math.round(totalHours * 10) / 10 }, tasks: filteredTasks.map(t => ({ name: t.name, deadline: t.deadline, difficulty: t.difficulty, status: t.status, hours: t.hours })), sessions: filteredSessions.length };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url;
-    a.download = `adaptime-analytics-${isoDate(new Date())}.json`;
-    a.click();
+    const url  = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `adaptime-analytics-${isoDate(new Date())}.json`; a.click();
     URL.revokeObjectURL(url);
   };
 
-  const [showExportMenu, setShowExportMenu] = useState(false);
+  const handleSetPriority = async (value) => {
+    if (!setPrefs) return;
+    setSavingPriority(true);
+    await setPrefs({ overduePriority: value, infeasiblePopupSeen: true });
+    await onReschedule?.();
+    setSavingPriority(false);
+  };
+
+  const currentPriority = prefs.overduePriority || 'unset';
 
   return (
     <div className="fade-in">
@@ -146,42 +135,64 @@ export default function Analytics({ tasks = [], schedules = [], energy = {}, ses
           <span style={{ fontSize: 12, color: '#4B6A8A', background: 'rgba(59,130,246,0.07)', padding: '3px 10px', borderRadius: 20, border: '1px solid rgba(59,130,246,0.12)' }}>
             {new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
           </span>
-          {/* Export button */}
           <div style={{ position: 'relative' }}>
-            <button
-              className="btn btn-ghost"
-              style={{ padding: '5px 12px', fontSize: 12 }}
-              onClick={() => setShowExportMenu(p => !p)}
-            >
+            <button className="btn btn-ghost" style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => setShowExportMenu(p => !p)}>
               📥 Export
             </button>
             {showExportMenu && (
-              <div style={{
-                position: 'absolute', right: 0, top: '110%', zIndex: 100,
-                background: '#0A1528', border: '1px solid rgba(59,130,246,0.22)',
-                borderRadius: 10, padding: 6, minWidth: 160,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-              }}>
-                <div
-                  onClick={() => { exportCSV(); setShowExportMenu(false); }}
-                  style={{ padding: '8px 12px', borderRadius: 7, cursor: 'pointer', fontSize: 13, color: '#A3C0E0', display: 'flex', alignItems: 'center', gap: 8 }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.08)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  📄 Export CSV
-                </div>
-                <div
-                  onClick={() => { exportJSON(); setShowExportMenu(false); }}
-                  style={{ padding: '8px 12px', borderRadius: 7, cursor: 'pointer', fontSize: 13, color: '#A3C0E0', display: 'flex', alignItems: 'center', gap: 8 }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.08)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  📋 Export JSON
-                </div>
+              <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 100, background: '#0A1528', border: '1px solid rgba(59,130,246,0.22)', borderRadius: 10, padding: 6, minWidth: 160, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+                {[['📄 Export CSV', exportCSV], ['📋 Export JSON', exportJSON]].map(([lbl, fn]) => (
+                  <div key={lbl} onClick={() => { fn(); setShowExportMenu(false); }}
+                    style={{ padding: '8px 12px', borderRadius: 7, cursor: 'pointer', fontSize: 13, color: '#A3C0E0' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.08)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >{lbl}</div>
+                ))}
               </div>
             )}
           </div>
         </div>
+      </div>
+
+      {/* ── Overdue Priority Setting ── */}
+      <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(59,130,246,0.15)' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#7BA5C8', marginBottom: 4 }}>⚙️ Prioritas Penjadwalan Task Overdue</div>
+        <div style={{ fontSize: 12, color: '#3D5A7A', marginBottom: 14, lineHeight: 1.5 }}>
+          Atur bagaimana sistem memperlakukan task yang sudah tidak feasible atau melewati deadline.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {PRIORITY_OPTIONS.map(opt => (
+            <div
+              key={opt.value}
+              onClick={() => !savingPriority && handleSetPriority(opt.value)}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12, padding: '11px 14px',
+                borderRadius: 10, cursor: savingPriority ? 'not-allowed' : 'pointer',
+                background: currentPriority === opt.value ? `${opt.color}12` : 'rgba(11,22,45,0.4)',
+                border: `1px solid ${currentPriority === opt.value ? opt.color + '44' : 'rgba(59,130,246,0.08)'}`,
+                transition: 'all .15s', opacity: savingPriority ? 0.7 : 1,
+              }}
+            >
+              <div style={{
+                width: 18, height: 18, borderRadius: '50%', flexShrink: 0, marginTop: 1,
+                border: `2px solid ${currentPriority === opt.value ? opt.color : '#3D5A7A'}`,
+                background: currentPriority === opt.value ? opt.color : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {currentPriority === opt.value && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: currentPriority === opt.value ? opt.color : '#A3C0E0', marginBottom: 2 }}>
+                  {opt.icon} {opt.label}
+                </div>
+                <div style={{ fontSize: 11, color: '#4B6A8A', lineHeight: 1.4 }}>{opt.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {savingPriority && (
+          <div style={{ fontSize: 11, color: '#4B6A8A', marginTop: 8, textAlign: 'center' }}>Menyimpan & menjadwalkan ulang...</div>
+        )}
       </div>
 
       {/* Filter pills */}
@@ -238,7 +249,6 @@ export default function Analytics({ tasks = [], schedules = [], energy = {}, ses
                 </div>
               ))}
             </div>
-
             <div className="card">
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>◆ Distribusi Kesulitan</div>
               {diffData.map(d => (

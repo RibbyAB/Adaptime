@@ -2,13 +2,19 @@ import { useState } from 'react';
 import { formatHour } from '../utils/scheduler';
 import { diffColor } from '../utils/helpers';
 
-export default function SessionCard({ session, onUpdate, isPast }) {
-  const [expanded, setExpanded] = useState(false);
+/**
+ * SessionCard — shows a scheduled session.
+ * Checklist comes from the TASK (shared), not the session.
+ * Session notes remain session-specific (work log per sitting).
+ */
+export default function SessionCard({ session, task, onUpdate, onTaskUpdate, isPast }) {
+  const [expanded, setExpanded]   = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [note, setNote] = useState(session.note || '');
-  const [saving, setSaving] = useState(false);
+  const [note, setNote]           = useState(session.note || '');
+  const [saving, setSaving]       = useState(false);
 
-  const checklist = session.checklist || [];
+  // Checklist lives on the task document
+  const checklist = task?.checklist || [];
   const doneCount = checklist.filter(i => i.done).length;
 
   const toggleDone = async () => {
@@ -17,9 +23,11 @@ export default function SessionCard({ session, onUpdate, isPast }) {
     setSaving(false);
   };
 
+  // Toggle a checklist item on the TASK (not the session)
   const toggleCheckItem = async (itemId) => {
+    if (!task) return;
     const updated = checklist.map(i => i.id === itemId ? { ...i, done: !i.done } : i);
-    await onUpdate(session.id, { checklist: updated });
+    await onTaskUpdate(task.id, { checklist: updated });
   };
 
   const saveNote = async () => {
@@ -39,12 +47,8 @@ export default function SessionCard({ session, onUpdate, isPast }) {
         opacity: isPast && !session.isDone ? 0.7 : 1,
         transition: 'all .15s',
       }}>
-        {/* Header row — click to expand */}
-        <div
-          onClick={() => setExpanded(p => !p)}
-          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer' }}
-        >
-          {/* Difficulty bar */}
+        {/* Header row */}
+        <div onClick={() => setExpanded(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer' }}>
           <div style={{ width: 3, height: 36, borderRadius: 2, background: diffColor(session.difficulty), flexShrink: 0 }} />
 
           {/* Done checkbox */}
@@ -91,10 +95,13 @@ export default function SessionCard({ session, onUpdate, isPast }) {
         {expanded && (
           <div style={{ padding: '0 12px 12px 12px', borderTop: '1px solid rgba(59,130,246,0.08)' }}>
 
-            {/* Checklist */}
+            {/* Task checklist — shared with Task Management */}
             {checklist.length > 0 && (
               <div style={{ marginTop: 10, marginBottom: 10 }}>
-                <div style={{ fontSize: 11, color: '#4B6A8A', fontWeight: 700, marginBottom: 6 }}>CHECKLIST SESI</div>
+                <div style={{ fontSize: 11, color: '#4B6A8A', fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>CHECKLIST TASK</span>
+                  <span style={{ color: '#3D5A7A', fontWeight: 400 }}>{doneCount}/{checklist.length} selesai</span>
+                </div>
                 {checklist.map(item => (
                   <div
                     key={item.id}
@@ -117,14 +124,14 @@ export default function SessionCard({ session, onUpdate, isPast }) {
               </div>
             )}
 
-            {/* Note */}
+            {/* Session note — per-session work log */}
             <div style={{ marginTop: checklist.length > 0 ? 0 : 10 }}>
               <div style={{ fontSize: 11, color: '#4B6A8A', fontWeight: 700, marginBottom: 5 }}>CATATAN SESI</div>
               <textarea
                 value={note}
                 onChange={e => setNote(e.target.value)}
                 onBlur={saveNote}
-                placeholder="Apa yang sudah dikerjakan? (opsional)"
+                placeholder="Apa yang sudah dikerjakan di sesi ini? (opsional)"
                 rows={2}
                 style={{
                   width: '100%', boxSizing: 'border-box',
@@ -157,13 +164,14 @@ export default function SessionCard({ session, onUpdate, isPast }) {
         )}
       </div>
 
-      {/* Full modal */}
       {showModal && (
         <SessionModal
           session={session}
+          task={task}
           note={note}
           setNote={setNote}
           onUpdate={onUpdate}
+          onTaskUpdate={onTaskUpdate}
           onClose={() => setShowModal(false)}
         />
       )}
@@ -171,34 +179,27 @@ export default function SessionCard({ session, onUpdate, isPast }) {
   );
 }
 
-function SessionModal({ session, note, setNote, onUpdate, onClose }) {
+function SessionModal({ session, task, note, setNote, onUpdate, onTaskUpdate, onClose }) {
   const [localNote, setLocalNote] = useState(note);
-  const [checklist, setChecklist] = useState(session.checklist || []);
-  const [newItem, setNewItem]     = useState('');
   const [saving, setSaving]       = useState(false);
+
+  // Checklist comes from task — read-live so it stays in sync
+  const checklist = task?.checklist || [];
+  const doneCount = checklist.filter(i => i.done).length;
+
+  const toggleItem = async (id) => {
+    if (!task) return;
+    const updated = checklist.map(i => i.id === id ? { ...i, done: !i.done } : i);
+    await onTaskUpdate(task.id, { checklist: updated });
+  };
 
   const save = async () => {
     setSaving(true);
-    await onUpdate(session.id, {
-      note: localNote,
-      checklist,
-    });
+    await onUpdate(session.id, { note: localNote });
     setNote(localNote);
     setSaving(false);
     onClose();
   };
-
-  const toggleItem = (id) => {
-    setChecklist(prev => prev.map(i => i.id === id ? { ...i, done: !i.done } : i));
-  };
-
-  const addItem = () => {
-    if (!newItem.trim()) return;
-    setChecklist(prev => [...prev, { id: Date.now(), text: newItem.trim(), done: false }]);
-    setNewItem('');
-  };
-
-  const removeItem = (id) => setChecklist(prev => prev.filter(i => i.id !== id));
 
   const dur = Math.round((session.endH - session.startH) * 60);
 
@@ -215,7 +216,7 @@ function SessionModal({ session, note, setNote, onUpdate, onClose }) {
           <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={onClose}>✕</button>
         </div>
 
-        {/* Session info */}
+        {/* Session info chips */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
           {[
             [`🕐 ${formatHour(session.startH)} – ${formatHour(session.endH)}`, '#60A5FA'],
@@ -229,9 +230,9 @@ function SessionModal({ session, note, setNote, onUpdate, onClose }) {
           ))}
         </div>
 
-        {/* Mark done */}
+        {/* Mark session done */}
         <div
-          onClick={async () => { await onUpdate(session.id, { isDone: !session.isDone }); }}
+          onClick={async () => await onUpdate(session.id, { isDone: !session.isDone })}
           style={{
             display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
             borderRadius: 9, marginBottom: 16, cursor: 'pointer',
@@ -252,45 +253,37 @@ function SessionModal({ session, note, setNote, onUpdate, onClose }) {
           </span>
         </div>
 
-        {/* Checklist */}
-        <div className="form-group">
-          <label style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Checklist Sesi</span>
-            <span style={{ fontSize: 10, color: '#3D5A7A' }}>opsional</span>
-          </label>
-          {checklist.map(item => (
-            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-              <div
-                onClick={() => toggleItem(item.id)}
-                style={{
-                  width: 18, height: 18, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
+        {/* Task checklist — shared, reflects in Task Management */}
+        {checklist.length > 0 && (
+          <div className="form-group">
+            <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Checklist Task</span>
+              <span style={{ fontSize: 10, color: doneCount === checklist.length ? '#10B981' : '#3D5A7A' }}>
+                {doneCount}/{checklist.length} selesai
+              </span>
+            </label>
+            {checklist.map(item => (
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, cursor: 'pointer' }} onClick={() => toggleItem(item.id)}>
+                <div style={{
+                  width: 18, height: 18, borderRadius: 4, flexShrink: 0,
                   border: `2px solid ${item.done ? '#10B981' : '#3D5A7A'}`,
                   background: item.done ? '#10B981' : 'transparent',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}
-              >
-                {item.done && <span style={{ color: '#fff', fontSize: 11, fontWeight: 800 }}>✓</span>}
+                }}>
+                  {item.done && <span style={{ color: '#fff', fontSize: 11, fontWeight: 800 }}>✓</span>}
+                </div>
+                <span style={{ flex: 1, fontSize: 13, color: item.done ? '#3D5A7A' : '#A3C0E0', textDecoration: item.done ? 'line-through' : 'none' }}>
+                  {item.text}
+                </span>
               </div>
-              <span style={{ flex: 1, fontSize: 13, color: item.done ? '#3D5A7A' : '#A3C0E0', textDecoration: item.done ? 'line-through' : 'none' }}>
-                {item.text}
-              </span>
-              <button className="btn btn-ghost" style={{ padding: '2px 7px', fontSize: 11, color: '#EF4444' }} onClick={() => removeItem(item.id)}>✕</button>
+            ))}
+            <div style={{ fontSize: 11, color: '#3D5A7A', marginTop: 4 }}>
+              💡 Perubahan checklist langsung tersimpan ke task
             </div>
-          ))}
-          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            <input
-              className="inp"
-              style={{ flex: 1, padding: '6px 10px', fontSize: 12 }}
-              placeholder="Tambah item checklist..."
-              value={newItem}
-              onChange={e => setNewItem(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addItem()}
-            />
-            <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} onClick={addItem}>+</button>
           </div>
-        </div>
+        )}
 
-        {/* Note */}
+        {/* Session note */}
         <div className="form-group">
           <label style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Catatan Sesi</span>
@@ -309,7 +302,7 @@ function SessionModal({ session, note, setNote, onUpdate, onClose }) {
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Batal</button>
           <button className="btn btn-primary" style={{ flex: 2 }} onClick={save} disabled={saving}>
-            {saving ? '⏳ Menyimpan...' : '💾 Simpan'}
+            {saving ? '⏳ Menyimpan...' : '💾 Simpan Catatan'}
           </button>
         </div>
       </div>

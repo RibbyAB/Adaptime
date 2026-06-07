@@ -23,9 +23,9 @@ export function useTasks(uid) {
     await addDoc(collection(db, 'tasks'), {
       ...task,
       uid,
-      createdAt:   Date.now(),
-      description: task.description  || '',
-      checklist:   task.checklist    || [],
+      createdAt:        Date.now(),
+      description:      task.description      || '',
+      checklist:        task.checklist        || [],
       prefSessionHours: task.prefSessionHours || null,
     });
   };
@@ -35,7 +35,7 @@ export function useTasks(uid) {
   };
 
   const deleteTask = async (id) => {
-    const q   = query(collection(db, 'sessions'), where('taskId', '==', id));
+    const q    = query(collection(db, 'sessions'), where('taskId', '==', id));
     const snap = await getDocs(q);
     const batch = writeBatch(db);
     snap.docs.forEach(d => batch.delete(d.ref));
@@ -60,20 +60,31 @@ export function useSessions(uid) {
     });
   }, [uid]);
 
+  // Replace all sessions — preserves isDone/note/checklist via scheduler's sessionStateMap
+  // Handles Firestore batch limit of 500 ops by chunking
   const replaceAllSessions = async (scheduledArray) => {
-    const q = query(collection(db, 'sessions'), where('uid', '==', uid));
+    const q        = query(collection(db, 'sessions'), where('uid', '==', uid));
     const existing = await getDocs(q);
 
-    const batch = writeBatch(db);
+    const BATCH_LIMIT = 490;
+    const allOps = [
+      ...existing.docs.map(d => ({ type: 'delete', ref: d.ref })),
+      ...scheduledArray.map(s => ({
+        type: 'set',
+        ref:  doc(collection(db, 'sessions')),
+        data: { ...s, uid, isDone: s.isDone ?? false, note: s.note || '', checklist: s.checklist || [] },
+      })),
+    ];
 
-    existing.docs.forEach(d => batch.delete(d.ref));
-
-    scheduledArray.forEach(s => {
-      const ref = doc(collection(db, 'sessions'));
-      batch.set(ref, { ...s, uid, isDone: s.isDone ?? false, note: s.note || '', checklist: s.checklist || [] });
-    });
-
-    await batch.commit();
+    for (let i = 0; i < allOps.length; i += BATCH_LIMIT) {
+      const chunk = allOps.slice(i, i + BATCH_LIMIT);
+      const batch = writeBatch(db);
+      chunk.forEach(op => {
+        if (op.type === 'delete') batch.delete(op.ref);
+        else batch.set(op.ref, op.data);
+      });
+      await batch.commit();
+    }
   };
 
   const updateSession = async (id, updates) => {
@@ -103,9 +114,7 @@ export function useSchedules(uid) {
 
   const addSchedule = async (schedule) => {
     await addDoc(collection(db, 'schedules'), {
-      ...schedule,
-      uid,
-      difficulty: schedule.difficulty || 3,
+      ...schedule, uid, difficulty: schedule.difficulty || 3,
     });
   };
 
@@ -121,17 +130,17 @@ export function useSchedules(uid) {
 }
 
 // ─── Energy ──
+const ENERGY_DEFAULT = { pref: 'morning', morning: 5, afternoon: 3, evening: 2, night: 1 };
+
 export function useEnergy(uid) {
-  const DEFAULT = { pref: 'morning', morning: 5, afternoon: 3, evening: 2, night: 1 };
-  const [energy, setEnergyState] = useState(DEFAULT);
+  const [energy, setEnergyState] = useState(ENERGY_DEFAULT);
   const [loading, setLoading]    = useState(true);
 
   useEffect(() => {
     if (!uid) return;
     const ref = doc(db, 'energy', uid);
     return onSnapshot(ref, snap => {
-      // BUG FIX: Always merge with DEFAULT to ensure all keys are present
-      setEnergyState(snap.exists() ? { ...DEFAULT, ...snap.data() } : DEFAULT);
+      setEnergyState(snap.exists() ? { ...ENERGY_DEFAULT, ...snap.data() } : ENERGY_DEFAULT);
       setLoading(false);
     });
   }, [uid]);
@@ -143,7 +152,7 @@ export function useEnergy(uid) {
   return { energy, loading, setEnergy };
 }
 
-// ─── Work Cap Settings ──
+// ─── Work Cap ──
 export function useWorkCap(uid) {
   const DEFAULT_CAP = 8;
   const [workCap, setWorkCapState] = useState({ default: DEFAULT_CAP, overrides: {} });
@@ -165,12 +174,32 @@ export function useWorkCap(uid) {
   const getCapMap = () => {
     const map = {};
     if (workCap?.overrides) {
-      Object.entries(workCap.overrides).forEach(([date, cap]) => {
-        map[date] = cap;
-      });
+      Object.entries(workCap.overrides).forEach(([date, cap]) => { map[date] = cap; });
     }
     return map;
   };
 
   return { workCap, loading, setWorkCap, getCapMap, defaultCap: workCap?.default ?? DEFAULT_CAP };
+}
+
+// ─── Scheduling Preferences (overdue priority + popup seen flag) ──
+export function useSchedulingPrefs(uid) {
+  const DEFAULTS = { overduePriority: 'unset', infeasiblePopupSeen: false };
+  const [prefs, setPrefsState] = useState(DEFAULTS);
+  const [loading, setLoading]  = useState(true);
+
+  useEffect(() => {
+    if (!uid) return;
+    const ref = doc(db, 'schedulingPrefs', uid);
+    return onSnapshot(ref, snap => {
+      setPrefsState(snap.exists() ? { ...DEFAULTS, ...snap.data() } : DEFAULTS);
+      setLoading(false);
+    });
+  }, [uid]);
+
+  const setPrefs = async (updates) => {
+    await setDoc(doc(db, 'schedulingPrefs', uid), updates, { merge: true });
+  };
+
+  return { prefs, loading, setPrefs };
 }
