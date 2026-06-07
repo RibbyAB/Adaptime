@@ -20,15 +20,18 @@ export function useTasks(uid) {
   }, [uid]);
 
   const addTask = async (task) => {
-    await addDoc(collection(db, 'tasks'), {
-      ...task,
-      uid,
-      createdAt:   Date.now(),
-      description: task.description  || '',
-      checklist:   task.checklist    || [],
-      prefSessionHours: task.prefSessionHours || null,
-    });
-  };
+  const now = Date.now();
+
+  await addDoc(collection(db, 'tasks'), {
+    ...task,
+    uid,
+    createdAt: now,
+    assignedAt: now, // timestamp saat task dibuat
+    description: task.description || '',
+    checklist: task.checklist || [],
+    prefSessionHours: task.prefSessionHours || null,
+  });
+};
 
   const updateTask = async (id, updates) => {
     await updateDoc(doc(db, 'tasks', id), updates);

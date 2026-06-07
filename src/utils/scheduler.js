@@ -108,7 +108,12 @@ function getNextFreeWindow(slot, blocked, cursor, neededHours) {
  * @param {string} todayISO
  * @param {number} lookaheadDays
  * @param {Object} workCapOverride
- * @returns {{ scheduled: Array, warnings: Array }}
+ * @param {number} [nowMs]  - Current epoch ms (Date.now()). Slots before this
+ *                            moment on today's date are discarded. Per-task,
+ *                            task.assignedAt (if present) is used instead so
+ *                            a late-night reschedule doesn't block tasks that
+ *                            were created earlier in the day.
+ * @returns {{ scheduled: Array, warnings: Array, infeasibleTaskIds: Array }}
  */
 export function runScheduler(
   tasks,
@@ -116,12 +121,18 @@ export function runScheduler(
   energy,
   todayISO,
   lookaheadDays = 14,
-  workCapOverride = {}
+  workCapOverride = {},
+  nowMs = Date.now()
 ) {
-  if (!energy || !tasks || !fixedSchedules) return { scheduled: [], warnings: [] };
+  if (!energy || !tasks || !fixedSchedules) return { scheduled: [], warnings: [], infeasibleTaskIds: [] };
   const today  = new Date(todayISO + 'T00:00:00');
   const result = [];
   const warnings = [];
+
+  // Pre-compute "now" as fractional hour so we can clip slot cursors on today
+  const nowDate    = new Date(nowMs);
+  const nowDateISO = isoDate(nowDate);
+  const nowHour    = nowDate.getHours() + nowDate.getMinutes() / 60 + nowDate.getSeconds() / 3600;
 
   // ── Feasibility Pre-filter ─────────────────────────────────────────────────
   // Sebelum dijadwalkan, cek apakah setiap task masih mungkin diselesaikan
@@ -162,10 +173,12 @@ export function runScheduler(
 
     const slotCursors = {};
     for (const slot of SLOT_DEFINITIONS) {
+      // On today's date, never start a slot before the current wall-clock time.
+      // This prevents the scheduler from placing sessions in the past.
       let cursor = slot.startH;
-      const fixedInSlot = (blocked[dk] || [])
-        .filter(b => b.start < slot.endH && b.end > slot.startH)
-        .sort((a, b) => a.start - b.start);
+      if (dateISO === nowDateISO) {
+        cursor = Math.max(cursor, nowHour);
+      }
       slotCursors[slot.key] = cursor;
     }
 
@@ -183,6 +196,19 @@ export function runScheduler(
 
     const MIN_SESSION = 0.25;
     const MAX_SESSION = prefSessionH || 3;
+
+    // ── Per-task assignment floor ──────────────────────────────────────────
+    // Use task.assignedAt if available (new tasks), otherwise fall back to
+    // nowMs (covers legacy tasks that predate this field).
+    // This gives us the fractional hour on the task's assignment day so we
+    // can refuse slots that are earlier than when the task was created.
+    const taskAssignedMs      = task.assignedAt ?? nowMs;
+    const taskAssignedDate    = new Date(taskAssignedMs);
+    const taskAssignedDateISO = isoDate(taskAssignedDate);
+    const taskAssignedHour    = taskAssignedDate.getHours()
+                              + taskAssignedDate.getMinutes() / 60
+                              + taskAssignedDate.getSeconds() / 3600;
+    // ──────────────────────────────────────────────────────────────────────
 
     const taskSessions = [];
 
@@ -217,6 +243,21 @@ export function runScheduler(
         if (currentEnergy < 0.05) continue;
 
         const capRemaining   = ds.cap - ds.workHoursUsed;
+
+        // ── Past-slot guard (per task) ────────────────────────────────────
+        // On the task's assignment day, refuse any slot that ends before
+        // the assignment time. Partially-past slots are clipped so they
+        // start no earlier than the assignment hour.
+        if (dISO === taskAssignedDateISO) {
+          // If the entire slot has already passed, skip it entirely
+          if (slot.endH <= taskAssignedHour) continue;
+          // Clip the cursor so we don't start before assignment time
+          if (ds.slotCursors[slot.key] < taskAssignedHour) {
+            ds.slotCursors[slot.key] = taskAssignedHour;
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────
+
         const slotRemaining  = slot.endH - ds.slotCursors[slot.key];
         if (slotRemaining < MIN_SESSION) continue;
 

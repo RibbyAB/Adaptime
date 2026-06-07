@@ -73,7 +73,8 @@ export default function App() {
       // scheduler sekarang juga mengembalikan infeasibleTaskIds —
       // yaitu task pending/in-progress yang durasinya tidak muat sebelum deadline
       const { scheduled, infeasibleTaskIds } = runScheduler(
-        tasks, schedules, energySettings, todayISO, 14, capMap
+        tasks, schedules, energySettings, todayISO, 14, capMap,
+        Date.now()   // nowMs — prevents scheduling sessions in the past
       );
 
       // ── Update status task yang tidak feasible ke 'overdue' ──────────────
