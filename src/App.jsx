@@ -3,6 +3,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
 import { useTasks, useSchedules, useEnergy, useSessions, useWorkCap, useSchedulingPrefs } from './hooks/useFirestore';
 import { runScheduler, findNextAvailableSlot } from './utils/scheduler';
+import { useToast, ToastContainer } from './components/Toast';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
@@ -24,9 +25,11 @@ export default function App() {
   const [user, setUser]               = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [view, setView] = useState(() => localStorage.getItem('lastView') || 'dashboard');
-  const [rescheduling, setRescheduling] = useState(false);
+  const [rescheduling, setRescheduling]         = useState(false);
   const [showInfeasiblePopup, setShowInfeasiblePopup] = useState(false);
   const [pendingInfeasibleIds, setPendingInfeasibleIds] = useState([]);
+
+  const { toasts, addToast, removeToast } = useToast();
 
   useEffect(() => { localStorage.setItem('lastView', view); }, [view]);
 
@@ -41,7 +44,7 @@ export default function App() {
   const { workCap,  setWorkCap, getCapMap, defaultCap            } = useWorkCap(user?.uid);
   const { prefs,    setPrefs                                      } = useSchedulingPrefs(user?.uid);
 
-  // ── Auto-overdue: tasks past deadline flip to overdue ──
+  // ── Auto-overdue ──────────────────────────────────────────────────────────
   const overdueKey = useMemo(
     () => tasks.map(t => `${t.id}:${t.status}:${t.deadline}`).join(','),
     [tasks]
@@ -56,34 +59,26 @@ export default function App() {
     });
   }, [overdueKey]);
 
-  // ── Core reschedule ──────────────────────────────────────────────────────────
+  // ── Core reschedule ───────────────────────────────────────────────────────
   const doReschedule = useCallback(async () => {
     if (!user?.uid || tasks.length === 0) return;
     setRescheduling(true);
     const startTime = Date.now();
     try {
-      const todayISO  = isoDate(new Date());
-      const capMap    = getCapMap ? getCapMap() : {};
+      const todayISO = isoDate(new Date());
+      const capMap   = getCapMap ? getCapMap() : {};
       const { scheduled, infeasibleTaskIds } = runScheduler(
-        tasks,
-        schedules,
-        energySettings,
-        todayISO,
-        14,
-        capMap,
+        tasks, schedules, energySettings, todayISO, 14, capMap,
         prefs.overduePriority || 'unset',
-        sessions  // pass existing sessions for state preservation
+        sessions
       );
 
-      // Handle infeasible tasks
       if (infeasibleTaskIds.length > 0 && updateTask) {
-        // Mark as overdue in Firestore (only if not already)
         const updates = infeasibleTaskIds
           .filter(id => { const t = tasks.find(t => t.id === id); return t && t.status !== 'overdue'; })
           .map(id => updateTask(id, { status: 'overdue' }));
         await Promise.all(updates);
 
-        // Show one-time popup if preference is unset
         if (prefs.overduePriority === 'unset' && !prefs.infeasiblePopupSeen) {
           setPendingInfeasibleIds(infeasibleTaskIds);
           setShowInfeasiblePopup(true);
@@ -93,61 +88,53 @@ export default function App() {
       await replaceAllSessions(scheduled);
     } catch (err) {
       console.error('Reschedule failed:', err);
+      addToast('Gagal menjadwalkan ulang', 'error');
     } finally {
-      const elapsed     = Date.now() - startTime;
-      const minDuration = 1500;
-      setTimeout(() => setRescheduling(false), Math.max(0, minDuration - elapsed));
+      const elapsed = Date.now() - startTime;
+      setTimeout(() => setRescheduling(false), Math.max(0, 1500 - elapsed));
     }
   }, [user, tasks, schedules, energySettings, getCapMap, replaceAllSessions, prefs, sessions, updateTask]);
 
-  // ── Catch-up session: when user un-checks a past session ────────────────────
+  // ── Catch-up session (un-check past session) ──────────────────────────────
   const handleUncheckedPastSession = useCallback(async (session) => {
     const todayISO   = isoDate(new Date());
     const capMap     = getCapMap ? getCapMap() : {};
     const hoursNeeded = session.endH - session.startH;
 
     const slot = findNextAvailableSlot(
-      hoursNeeded,
-      schedules,
-      energySettings,
-      sessions,
-      todayISO,
-      14,
-      capMap
+      hoursNeeded, schedules, energySettings, sessions, todayISO, 14, capMap
     );
 
     if (slot) {
-      // Create a new catch-up session
       await replaceAllSessions([
         ...sessions.filter(s => s.id !== session.id),
         {
-          taskId:       session.taskId,
-          taskName:     session.taskName,
-          difficulty:   session.difficulty,
-          day:          slot.day,
-          date:         slot.date,
-          slotKey:      slot.slotKey,
-          slotLabel:    slot.slotLabel,
-          slotIcon:     slot.slotIcon,
-          startH:       slot.startH,
-          endH:         slot.endH,
-          sessionNum:   session.sessionNum,
+          taskId:        session.taskId,
+          taskName:      session.taskName,
+          difficulty:    session.difficulty,
+          day:           slot.day,
+          date:          slot.date,
+          slotKey:       slot.slotKey,
+          slotLabel:     slot.slotLabel,
+          slotIcon:      slot.slotIcon,
+          startH:        slot.startH,
+          endH:          slot.endH,
+          sessionNum:    session.sessionNum,
           totalSessions: session.totalSessions,
-          energyLevel:  slot.energyLevel,
-          isDone:       false,
-          note:         '',
-          checklist:    [],
+          energyLevel:   slot.energyLevel,
+          isDone:        false,
+          note:          '',
+          checklist:     [],
         },
       ]);
     } else {
-      // No slot found — full reschedule
       await doReschedule();
     }
   }, [schedules, energySettings, sessions, getCapMap, replaceAllSessions, doReschedule]);
 
-  // ── Stable reschedule trigger ────────────────────────────────────────────────
+  // ── Stable reschedule trigger ─────────────────────────────────────────────
   const taskHash = useMemo(
-    () => tasks.map(t => `${t.id}:${t.deadline}:${t.hours}:${t.difficulty}`).sort().join('|'),
+    () => tasks.map(t => `${t.id}:${t.deadline}:${t.hours}:${t.difficulty}:${t.timePref}`).sort().join('|'),
     [tasks]
   );
   const schedHash = useMemo(
@@ -175,7 +162,7 @@ export default function App() {
     await doReschedule();
   };
 
-  // ── Infeasible popup handlers ────────────────────────────────────────────────
+  // ── Infeasible popup ──────────────────────────────────────────────────────
   const handleSetPriority = async (priority) => {
     await setPrefs({ overduePriority: priority, infeasiblePopupSeen: true });
     setShowInfeasiblePopup(false);
@@ -208,7 +195,7 @@ export default function App() {
       <div className="main-content">
         {rescheduling && (
           <div style={{
-            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 999,
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 998,
             background: 'rgba(59,130,246,0.15)', borderBottom: '1px solid rgba(59,130,246,0.3)',
             padding: '8px 0', textAlign: 'center', fontSize: 13, color: '#60A5FA',
           }}>
@@ -216,7 +203,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ── One-time infeasible popup ── */}
+        {/* ── Infeasible popup ── */}
         {showInfeasiblePopup && (
           <div style={{
             position: 'fixed', inset: 0, zIndex: 1000,
@@ -241,31 +228,19 @@ export default function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <button
                   onClick={() => handleSetPriority('overdue')}
-                  style={{
-                    padding: '11px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                    background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
-                    color: '#FCD34D', textAlign: 'left',
-                  }}
+                  style={{ padding: '11px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#FCD34D', textAlign: 'left' }}
                 >
                   ⏫ Utamakan task overdue — jadwalkan mereka lebih dulu
                 </button>
                 <button
                   onClick={() => handleSetPriority('current')}
-                  style={{
-                    padding: '11px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                    background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)',
-                    color: '#60A5FA', textAlign: 'left',
-                  }}
+                  style={{ padding: '11px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', color: '#60A5FA', textAlign: 'left' }}
                 >
                   📅 Utamakan task tepat waktu — fokus ke yang masih bisa diselesaikan
                 </button>
                 <button
                   onClick={handleDismissPopup}
-                  style={{
-                    padding: '9px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 12,
-                    background: 'transparent', border: '1px solid rgba(59,130,246,0.1)',
-                    color: '#4B6A8A',
-                  }}
+                  style={{ padding: '9px 16px', borderRadius: 9, cursor: 'pointer', fontSize: 12, background: 'transparent', border: '1px solid rgba(59,130,246,0.1)', color: '#4B6A8A' }}
                 >
                   Nanti saja — biarkan sistem memutuskan
                 </button>
@@ -292,8 +267,11 @@ export default function App() {
             sessions={sessions}
             addTask={addTask}
             updateTask={updateTask}
+            updateSession={updateSession}
             deleteTask={deleteTask}
+            energy={energySettings}
             onReschedule={doReschedule}
+            onToast={addToast}
           />
         )}
         {view === 'schedule' && (
@@ -337,6 +315,8 @@ export default function App() {
           <Profile user={user} onApplyEnergyResult={handleApplyEnergyResult} />
         )}
       </div>
+
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }

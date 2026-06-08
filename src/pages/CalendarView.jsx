@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { formatHour, SLOT_DEFINITIONS, DAYS } from '../utils/scheduler';
 import { diffColor } from '../utils/helpers';
+import { formatHour, SLOT_DEFINITIONS, DAYS } from '../utils/scheduler';
 import SessionCard from '../components/SessionCard';
 
 const MONTHS_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
@@ -21,12 +21,53 @@ function isoDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-export default function CalendarView({ tasks = [], schedules = [], sessions = [], onReschedule, rescheduling, updateSession, updateTask }) {
+export default function CalendarView({
+  tasks = [], schedules = [], sessions = [],
+  sessionsLoading = false, onReschedule, rescheduling,
+  updateSession, deleteSession, updateTask, onUncheckedPastSession,
+}) {
   const todayISO = isoDate(new Date());
 
-  // Smart session update: when all sessions of a task are done -> mark task done
-  // When a session is un-done -> revert task to in-progress
-  const [weekStart, setWeekStart]     = useState(() => getMonday(new Date()));
+  // ── Session update: sync task status when all sessions done/undone ────────
+  const handleSessionUpdate = async (sessionId, updates) => {
+    await updateSession(sessionId, updates);
+
+    if (!('isDone' in updates)) return;
+
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    const task = tasks.find(t => t.id === session.taskId);
+    if (!task || task.status === 'overdue') return;
+
+    // Optimistically apply update to determine aggregate state
+    const taskSessions = sessions
+      .filter(s => s.taskId === session.taskId)
+      .map(s => s.id === sessionId ? { ...s, ...updates } : s);
+
+    if (taskSessions.length === 0) return;
+
+    const allDone = taskSessions.every(s => s.isDone);
+    const anyDone = taskSessions.some(s => s.isDone);
+
+    // If a past session is un-checked, try to reschedule a catch-up slot
+    if (!updates.isDone && onUncheckedPastSession) {
+      const pastSession = sessions.find(s => s.id === sessionId);
+      if (pastSession && pastSession.date < todayISO) {
+        onUncheckedPastSession(pastSession);
+      }
+    }
+
+    if (allDone && task.status !== 'done') {
+      await updateTask(task.id, { status: 'done' });
+    } else if (!allDone && task.status === 'done') {
+      await updateTask(task.id, { status: 'in-progress' });
+    } else if (anyDone && task.status === 'pending') {
+      await updateTask(task.id, { status: 'in-progress' });
+    }
+  };
+
+  const [weekStart, setWeekStart]       = useState(() => getMonday(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayISO);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => {
@@ -43,7 +84,7 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
     .filter(s => s.date === selectedDate)
     .sort((a, b) => a.startH - b.startH);
 
-  const selectedDayJS  = new Date(selectedDate + 'T00:00:00');
+  const selectedDayJS   = new Date(selectedDate + 'T00:00:00');
   const selectedDayName = DAYS[selectedDayJS.getDay() === 0 ? 6 : selectedDayJS.getDay() - 1];
 
   const dayFixed = schedules
@@ -66,53 +107,9 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
   const isPast  = (dateStr) => dateStr < todayISO;
   const isToday = (dateStr) => dateStr === todayISO;
 
-  function isoDateLocal(d) {
-    const y   = d.getFullYear();
-    const m   = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }
-
-  const handleSessionUpdate = async (sessionId, updates) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (!session) { await updateSession(sessionId, updates); return; }
-
-    // Detect un-done on a past-timeframe session
-    if ('isDone' in updates && updates.isDone === false && session.isDone === true) {
-      const todayISO = isoDateLocal(new Date());
-      const now      = new Date();
-      const nowHour  = now.getHours() + now.getMinutes() / 60;
-      const isPastSession = session.date < todayISO ||
-        (session.date === todayISO && session.endH < nowHour);
-
-      await updateSession(sessionId, updates);
-
-      if (isPastSession && onUncheckedPastSession) {
-        onUncheckedPastSession(session);
-      }
-      return;
-    }
-
-    await updateSession(sessionId, updates);
-
-    // Auto-update task status based on session done states
-    if ('isDone' in updates && session.taskId && updateTask) {
-      const taskSessions = sessions.filter(s => s.taskId === session.taskId);
-      const updatedSessions = taskSessions.map(s =>
-        s.id === sessionId ? { ...s, ...updates } : s
-      );
-      const allDone = updatedSessions.length > 0 && updatedSessions.every(s => s.isDone);
-      const anyDone = updatedSessions.some(s => s.isDone);
-      if (allDone) {
-        await updateTask(session.taskId, { status: 'done' });
-      } else if (anyDone) {
-        await updateTask(session.taskId, { status: 'in-progress' });
-      }
-    }
-  };
-
   return (
     <div className="fade-in">
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <h2 style={{ fontSize: 21, fontWeight: 800, color: '#E2ECFF' }}>📆 Kalender Jadwal</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -135,12 +132,12 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
           {weekDays.map(d => {
-            const iso      = isoDate(d);
-            const count    = sessionsPerDay[iso] || 0;
-            const past     = isPast(iso);
-            const today    = isToday(iso);
-            const sel      = iso === selectedDate;
-            const jsDay    = d.getDay();
+            const iso   = isoDate(d);
+            const count = sessionsPerDay[iso] || 0;
+            const past  = isPast(iso);
+            const today = isToday(iso);
+            const sel   = iso === selectedDate;
+            const jsDay = d.getDay();
             const dayLabel = DAYS[jsDay === 0 ? 6 : jsDay - 1].slice(0, 3);
             return (
               <div key={iso} onClick={() => setSelectedDate(iso)} style={{
@@ -175,7 +172,12 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
           </div>
           {dayScheduled.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '30px 0', color: '#3D5A7A', fontSize: 12 }}>
-              {rescheduling ? '⏳ Menjadwalkan...' : isPast(selectedDate) ? '📭 Tidak ada sesi' : '🎉 Tidak ada task untuk hari ini'}
+              {(rescheduling || sessionsLoading) ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 24, height: 24, border: '2px solid rgba(59,130,246,0.3)', borderTop: '2px solid #3B82F6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  <span>{rescheduling ? 'Menjadwalkan ulang...' : 'Memuat sesi...'}</span>
+                </div>
+              ) : isPast(selectedDate) ? '📭 Tidak ada sesi' : '🎉 Tidak ada task untuk hari ini'}
             </div>
           ) : SLOT_DEFINITIONS.map(slot => {
             const slotSessions = dayScheduled.filter(s => s.slotKey === slot.key);
@@ -186,9 +188,19 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
                   {slot.icon} {slot.label}
                   <span style={{ fontSize: 10, color: '#3D5A7A', marginLeft: 4 }}>({formatHour(slot.startH)}–{formatHour(slot.endH)})</span>
                 </div>
-                {slotSessions.map(s => (
-                  <SessionCard key={s.id} session={s} task={tasks.find(t => t.id === s.taskId)} onUpdate={handleSessionUpdate} onTaskUpdate={updateTask} isPast={isPast(selectedDate)} />
-                ))}
+                {slotSessions.map(s => {
+                  const task = tasks.find(t => t.id === s.taskId);
+                  return (
+                    <SessionCard
+                      key={s.id}
+                      session={s}
+                      task={task}
+                      onUpdate={handleSessionUpdate}
+                      onTaskUpdate={updateTask}
+                      isPast={isPast(selectedDate)}
+                    />
+                  );
+                })}
               </div>
             );
           })}
@@ -216,18 +228,18 @@ export default function CalendarView({ tasks = [], schedules = [], sessions = []
           <div className="card">
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📊 Progress Minggu Ini</div>
             {(() => {
-              const weekISOs       = weekDays.map(d => isoDate(d));
-              const thisWeekSched  = sessions.filter(s => weekISOs.includes(s.date));
-              const uniqueTasks    = new Set(thisWeekSched.map(s => s.taskId)).size;
-              const totalSessions  = thisWeekSched.length;
-              const totalHours     = thisWeekSched.reduce((acc, s) => acc + (s.endH - s.startH), 0);
+              const weekISOs      = weekDays.map(d => isoDate(d));
+              const thisWeekSched = sessions.filter(s => weekISOs.includes(s.date));
+              const uniqueTasks   = new Set(thisWeekSched.map(s => s.taskId)).size;
+              const totalSessions = thisWeekSched.length;
+              const totalHours    = thisWeekSched.reduce((acc, s) => acc + (s.endH - s.startH), 0);
               return (
                 <>
                   {[
-                    ['Task aktif', uniqueTasks, '#E2ECFF'],
-                    ['Total sesi', totalSessions, '#E2ECFF'],
-                    ['Total jam', `${Math.round(totalHours * 10) / 10}j`, '#10B981'],
-                    ['Selesai', `${doneTasks.length} task`, '#34D399'],
+                    ['Task aktif',  uniqueTasks,                                        '#E2ECFF'],
+                    ['Total sesi',  totalSessions,                                      '#E2ECFF'],
+                    ['Total jam',   `${Math.round(totalHours * 10) / 10}j`,             '#10B981'],
+                    ['Selesai',     `${doneTasks.length} task`,                         '#34D399'],
                   ].map(([label, value, color]) => (
                     <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
                       <span style={{ color: '#7BA5C8' }}>{label}</span>

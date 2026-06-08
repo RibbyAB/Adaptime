@@ -34,10 +34,7 @@ export const typeBadge = (type) => {
   return map[type] ?? { cls: 'badge-kelas', label: type };
 };
 
-/**
- * Cek apakah task masih bisa diselesaikan sebelum deadline.
- * Deadline dianggap akhir hari (23:59:59).
- */
+// ── Simple feasibility check (used in TaskModal) ───────────────────────────
 export function checkFeasibility(deadline, hours) {
   if (!deadline || !hours || hours <= 0) {
     return { feasible: true, remainingHours: Infinity, neededHours: hours || 0 };
@@ -47,8 +44,49 @@ export function checkFeasibility(deadline, hours) {
   const remainingMs    = deadlineEnd - now;
   const remainingHours = remainingMs / (1000 * 60 * 60);
   return {
-    feasible:        remainingHours >= hours,
-    remainingHours:  Math.round(remainingHours * 100) / 100,
-    neededHours:     hours,
+    feasible:       remainingHours >= hours,
+    remainingHours: Math.round(remainingHours * 100) / 100,
+    neededHours:    hours,
+  };
+}
+
+// ── Detailed feasibility check with energy profile (used in Tasks page) ────
+const SLOT_HOURS = {
+  morning:   6,   // 06–12
+  afternoon: 5,   // 12–17
+  evening:   3,   // 17–20
+  night:     4,   // 20–24
+};
+
+export function checkDeadlineFeasibility(task, energy) {
+  const now        = new Date();
+  const deadlineMs = new Date(task.deadline + 'T23:59:59').getTime();
+  const nowMs      = now.getTime();
+
+  if (deadlineMs <= nowMs) {
+    return { feasible: false, availableHours: 0, hoursNeeded: task.hours || 0, deficit: task.hours || 0, daysUntil: 0 };
+  }
+
+  const diffMs    = deadlineMs - nowMs;
+  const diffDays  = diffMs / (1000 * 60 * 60 * 24);
+  const hoursNeeded = task.hours || 0;
+
+  let productiveHoursPerDay = 0;
+  for (const [slotKey, slotHours] of Object.entries(SLOT_HOURS)) {
+    const energyLevel = (energy && energy[slotKey]) || 3;
+    if (energyLevel >= 2) {
+      productiveHoursPerDay += slotHours * Math.min(energyLevel / 5, 1);
+    }
+  }
+  productiveHoursPerDay = Math.min(productiveHoursPerDay, 8);
+
+  const availableHours = Math.round(diffDays * productiveHoursPerDay * 10) / 10;
+
+  return {
+    feasible:       availableHours >= hoursNeeded,
+    availableHours,
+    hoursNeeded,
+    deficit:        Math.max(0, Math.round((hoursNeeded - availableHours) * 10) / 10),
+    daysUntil:      Math.ceil(diffDays),
   };
 }
