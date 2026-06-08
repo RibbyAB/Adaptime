@@ -168,7 +168,7 @@ export function useWorkCap(uid) {
   }, [uid]);
 
   const setWorkCap = async (updates) => {
-    await setDoc(doc(db, 'workCap', uid), updates, { merge: true });
+    await setDoc(doc(db, 'workCap', uid), updates);
   };
 
   const getCapMap = () => {

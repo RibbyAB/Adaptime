@@ -55,7 +55,8 @@ export default function Energy({ energySettings = {}, setEnergySettings, workCap
 
   const addDayOverride = async () => {
     if (!overrideDay) return;
-    const overrides = { ...(workCap?.overrides || {}), [overrideDay]: parseFloat(overrideCap) || 8 };
+    const parsed = parseFloat(overrideCap);
+    const overrides = { ...(workCap?.overrides || {}), [overrideDay]: isNaN(parsed) ? 8 : parsed };
     setSaving(true);
     await setWorkCap({ ...workCap, overrides });
     await onReschedule?.();
@@ -131,7 +132,7 @@ export default function Energy({ energySettings = {}, setEnergySettings, workCap
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <input
                 className="inp"
-                type="number" min="1" max="24" step="0.5"
+                type="number" min="0" max="24" step="0.5"
                 value={overrideCap}
                 onChange={e => setOverrideCap(e.target.value)}
                 style={{ width: 70, textAlign: 'center' }}
@@ -148,7 +149,9 @@ export default function Energy({ energySettings = {}, setEnergySettings, workCap
             <div key={date} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0', borderBottom: '1px solid rgba(59,130,246,0.05)' }}>
               <span style={{ color: '#A3C0E0' }}>{date}</span>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <span style={{ color: cap > OVERWORK_THRESHOLD ? '#F59E0B' : '#10B981', fontWeight: 700 }}>{cap} jam</span>
+                <span style={{ color: cap === 0 ? '#4B6A8A' : cap > OVERWORK_THRESHOLD ? '#F59E0B' : '#10B981', fontWeight: 700 }}>
+                  {cap === 0 ? 'Libur' : `${cap} jam`}
+                </span>
                 <button className="btn btn-danger" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => removeDayOverride(date)}>✕</button>
               </div>
             </div>

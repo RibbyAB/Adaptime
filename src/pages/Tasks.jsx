@@ -22,8 +22,28 @@ function formatHours(h) {
 }
 
 // ── Feasibility warning banner per-task ──────────────────────────────────────
-function FeasibilityWarning({ task, energy }) {
+function FeasibilityWarning({ task, energy, isInfeasible }) {
   if (task.status === 'done' || task.status === 'overdue') return null;
+
+  // If the scheduler flagged it infeasible, show that warning
+  if (isInfeasible) {
+    return (
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          marginTop: 7, padding: '7px 10px', borderRadius: 7,
+          background: 'rgba(245,158,11,0.08)',
+          border: '1px solid rgba(245,158,11,0.22)',
+          fontSize: 11, color: '#FCD34D',
+          lineHeight: 1.5, display: 'flex', gap: 6, alignItems: 'flex-start',
+        }}
+      >
+        <span style={{ flexShrink: 0 }}>⚠️</span>
+        <span>Estimasi waktu task ini tidak muat dalam jadwal sebelum deadline. Pertimbangkan kurangi jam atau perpanjang deadline.</span>
+      </div>
+    );
+  }
+
   const { feasible, availableHours, hoursNeeded, deficit, daysUntil } =
     checkDeadlineFeasibility(task, energy);
   if (feasible) return null;
@@ -51,7 +71,7 @@ function FeasibilityWarning({ task, energy }) {
   );
 }
 
-export default function Tasks({ tasks, sessions = [], addTask, updateTask, updateSession, deleteTask, onToast, energy }) {
+export default function Tasks({ tasks, sessions = [], addTask, updateTask, updateSession, deleteTask, onToast, energy, infeasibleTaskIds = [] }) {
   const [filter, setFilter]               = useState('all');
   const [search, setSearch]               = useState('');
   const [modal, setModal]                 = useState(null);
@@ -70,9 +90,9 @@ export default function Tasks({ tasks, sessions = [], addTask, updateTask, updat
   const infeasibleCount = useMemo(() =>
     tasks.filter(t => {
       if (t.status === 'done' || t.status === 'overdue') return false;
-      return !checkDeadlineFeasibility(t, energy).feasible;
+      return infeasibleTaskIds.includes(t.id) || !checkDeadlineFeasibility(t, energy).feasible;
     }).length,
-    [tasks, energy]
+    [tasks, energy, infeasibleTaskIds]
   );
 
   const filtered = useMemo(() => {
@@ -289,7 +309,7 @@ export default function Tasks({ tasks, sessions = [], addTask, updateTask, updat
                   );
                 })()}
               </div>
-              <FeasibilityWarning task={t} energy={energy} />
+              <FeasibilityWarning task={t} energy={energy} isInfeasible={infeasibleTaskIds.includes(t.id)} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
@@ -303,7 +323,7 @@ export default function Tasks({ tasks, sessions = [], addTask, updateTask, updat
                       opacity: isUpdating ? 0.6 : 1,
                       cursor: isUpdating ? 'wait' : 'pointer',
                       minWidth: 72,
-                      ...(t.status === 'overdue' && !isUpdating ? {
+                      ...((t.status === 'in-progress') && !isUpdating ? {
                         color: '#10B981',
                         borderColor: 'rgba(16,185,129,0.3)',
                         background: 'rgba(16,185,129,0.07)',
@@ -311,12 +331,12 @@ export default function Tasks({ tasks, sessions = [], addTask, updateTask, updat
                     }}
                     disabled={isUpdating}
                     onClick={e => handleStatusChange(e, t,
-                      (t.status === 'in-progress' || t.status === 'overdue') ? 'done' : 'in-progress'
+                      t.status === 'in-progress' ? 'done' : 'in-progress'
                     )}
                   >
                     {isUpdating
                       ? '⏳'
-                      : (t.status === 'in-progress' || t.status === 'overdue')
+                      : t.status === 'in-progress'
                         ? '✓ Selesai'
                         : '▶ Mulai'}
                   </button>

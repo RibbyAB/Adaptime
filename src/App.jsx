@@ -25,9 +25,10 @@ export default function App() {
   const [user, setUser]               = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [view, setView] = useState(() => localStorage.getItem('lastView') || 'dashboard');
-  const [rescheduling, setRescheduling]         = useState(false);
+  const [rescheduling, setRescheduling]               = useState(false);
   const [showInfeasiblePopup, setShowInfeasiblePopup] = useState(false);
   const [pendingInfeasibleIds, setPendingInfeasibleIds] = useState([]);
+  const [infeasibleTaskIds, setInfeasibleTaskIds]     = useState([]);
 
   const { toasts, addToast, removeToast } = useToast();
 
@@ -73,16 +74,15 @@ export default function App() {
         sessions
       );
 
-      if (infeasibleTaskIds.length > 0 && updateTask) {
-        const updates = infeasibleTaskIds
-          .filter(id => { const t = tasks.find(t => t.id === id); return t && t.status !== 'overdue'; })
-          .map(id => updateTask(id, { status: 'overdue' }));
-        await Promise.all(updates);
+      if (infeasibleTaskIds.length > 0) {
+        setInfeasibleTaskIds(infeasibleTaskIds);
 
         if (prefs.overduePriority === 'unset' && !prefs.infeasiblePopupSeen) {
           setPendingInfeasibleIds(infeasibleTaskIds);
           setShowInfeasiblePopup(true);
         }
+      } else {
+        setInfeasibleTaskIds([]);
       }
 
       await replaceAllSessions(scheduled);
@@ -187,6 +187,7 @@ export default function App() {
   const sharedProps = {
     tasks, schedules, energy: energySettings, sessions,
     onReschedule: doReschedule, rescheduling,
+    infeasibleTaskIds,
   };
 
   return (

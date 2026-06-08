@@ -67,20 +67,28 @@ export function checkDeadlineFeasibility(task, energy) {
     return { feasible: false, availableHours: 0, hoursNeeded: task.hours || 0, deficit: task.hours || 0, daysUntil: 0 };
   }
 
-  const diffMs    = deadlineMs - nowMs;
-  const diffDays  = diffMs / (1000 * 60 * 60 * 24);
+  const diffMs      = deadlineMs - nowMs;
+  const diffDays    = diffMs / (1000 * 60 * 60 * 24);
   const hoursNeeded = task.hours || 0;
 
-  let productiveHoursPerDay = 0;
-  for (const [slotKey, slotHours] of Object.entries(SLOT_HOURS)) {
-    const energyLevel = (energy && energy[slotKey]) || 3;
-    if (energyLevel >= 2) {
-      productiveHoursPerDay += slotHours * Math.min(energyLevel / 5, 1);
-    }
-  }
-  productiveHoursPerDay = Math.min(productiveHoursPerDay, 8);
+  let availableHours;
 
-  const availableHours = Math.round(diffDays * productiveHoursPerDay * 10) / 10;
+  if (diffDays < 1) {
+    // Deadline is today: use actual remaining clock hours, not a scaled estimate.
+    // The user can work right up to midnight, so raw hours remaining is the right ceiling.
+    availableHours = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
+  } else {
+    // Deadline is tomorrow or later: use energy-weighted productive hours per day.
+    let productiveHoursPerDay = 0;
+    for (const [slotKey, slotHours] of Object.entries(SLOT_HOURS)) {
+      const energyLevel = (energy && energy[slotKey]) || 3;
+      if (energyLevel >= 2) {
+        productiveHoursPerDay += slotHours * Math.min(energyLevel / 5, 1);
+      }
+    }
+    productiveHoursPerDay = Math.min(productiveHoursPerDay, 8);
+    availableHours = Math.round(diffDays * productiveHoursPerDay * 10) / 10;
+  }
 
   return {
     feasible:       availableHours >= hoursNeeded,
