@@ -5,6 +5,7 @@
 ADAPTIME is designed to make planning more realistic. Instead of only placing tasks into empty time slots, the scheduler considers when the user has more energy and adjusts the schedule when tasks, fixed activities, or availability change.
 
 ---
+🌐 **Live Demo:** https://adaptime-df1f2.web.app
 
 ## Key Features
 
